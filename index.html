@@ -20,11 +20,11 @@
 const {useState, useEffect, useCallback} = React;
 
 // ── Airtable config ────────────────────────────────────────────────────────────
-const AT_TOKEN   = "patnM2LflVJdy6C9L";
+const AT_TOKEN   = "";
 const AT_BASE    = "app3lr3SoMQ6I15EC";
 const AT_TABLE   = "tblF0yF6F7kILqtdT";
 const AT_URL     = `https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/v0/${AT_BASE}/${AT_TABLE}`;
-const AT_HEADERS = { "Authorization": `Bearer ${AT_TOKEN}`, "Content-Type": "application/json" };
+const AT_HEADERS = { "Content-Type": "application/json" };
 
 // Airtable stores everything as fields. We serialize arrays/objects as JSON strings.
 const toAT = deal => ({
