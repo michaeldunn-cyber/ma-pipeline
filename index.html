@@ -32,6 +32,7 @@ const toAT = deal => ({
   stage:            deal.stage || "sourcing",
   maType:           deal.maType || "Unclear",
   buSponsor:        deal.buSponsor || "TBD",
+  platformPillar:   deal.platformPillar || "TBD",
   source:           deal.source || "",
   banker:           deal.banker || "",
   priceSignal:      deal.priceSignal || "",
@@ -57,6 +58,7 @@ const fromAT = rec => ({
   stage:            rec.fields.stage || "sourcing",
   maType:           rec.fields.maType || "Unclear",
   buSponsor:        rec.fields.buSponsor || "TBD",
+  platformPillar:   rec.fields.platformPillar || "TBD",
   source:           rec.fields.source || "",
   banker:           rec.fields.banker || "",
   priceSignal:      rec.fields.priceSignal || "",
@@ -124,6 +126,7 @@ const STAGES = [
   {id:"triage_memo",    label:"Triage memo",      color:"#854F0B", light:"#FAEEDA", dark:"#633806"},
   {id:"ic_review",      label:"IC review",        color:"#993C1D", light:"#FAECE7", dark:"#712B13"},
   {id:"deep_diligence", label:"Deep diligence",   color:"#185FA5", light:"#E6F1FB", dark:"#0C447C"},
+  {id:"hold",           label:"Hold",             color:"#185FA5", light:"#E6F1FB", dark:"#0C447C"},
   {id:"passed",         label:"Passed",           color:"#5F5E5A", light:"#F1EFE8", dark:"#444441"},
   {id:"closed",         label:"Closed / won",     color:"#3B6D11", light:"#EAF3DE", dark:"#27500A"},
 ];
@@ -137,11 +140,18 @@ const PROCESS = {
     pass: "Archive here if the company is clearly out of scope (wrong geography, wrong size, no conceivable fit) — no need to write a pass reason at this stage.",
   },
   triage: {
-    what: "A solo screen done by Corp Dev before involving anyone else. The goal is to filter out bad fits quickly and cheaply.",
+    what: "A solo screen done by Corp Dev before involving anyone else. The goal is to filter out bad fits quickly against Infillion's six evaluation criteria.",
     who: "Corp Dev lead only. Product and leadership are not involved yet.",
-    todo: ["M&A type fit: does this look like Type 1 (component) or Type 2 (customer vertical)?", "Market size: is the TAM meaningful?", "Deal structure viability: is limited cash upfront plausible?", "Red flags: anything that would make this a non-starter?"],
-    advance: "If all four checks pass, move to Product ping. If deal structure is already clear and product fit is obvious, you can jump straight to NDA.",
-    pass: "Pass here if any of the four checks fail. Note which one and why — this feeds the analytics view.",
+    todo: [
+      "1. Platform improvement: will this make existing products more valuable across multiple BUs — or is it a single-use feature?",
+      "2. Customer relationships: can this business's relationships generate more revenue combined with our platform?",
+      "3. Composability fit: does the technology integrate modularly? APIs first, not monoliths.",
+      "4. Flywheel impact: does this accelerate the cycle between our Business Units?",
+      "5. Team quality: domain experts and customer experts who will thrive in a structured, composable environment?",
+      "6. Revenue & margin profile: revenue scale, gross margin, customer concentration, contract portability.",
+    ],
+    advance: "If the majority of criteria pass, move to Product ping. If composability and platform fit are already obvious, you can jump straight to NDA.",
+    pass: "Pass here if criteria 1 (platform improvement) or 3 (composability fit) fail — these are non-negotiable. Note which criteria failed and why.",
   },
   product_ping: {
     what: "An async check-in with the Product team before signing an NDA. Avoids wasting legal and executive time on deals Product would kill anyway.",
@@ -178,6 +188,13 @@ const PROCESS = {
     advance: "Diligence complete and thesis holds → move to negotiation and close.",
     pass: "Any diligence finding that breaks the investment case → pass. Document specifically what was found.",
   },
+  hold: {
+    what: "The deal is interesting but the timing isn't right. Parked here until internal conditions change.",
+    who: "Corp Dev lead monitors. No broader team involvement needed while on hold.",
+    todo: ["Document why timing is wrong", "Note what needs to change before revisiting", "Set a reminder to re-evaluate in 60–90 days"],
+    advance: "Re-enter the pipeline at the appropriate stage when timing improves.",
+    pass: "If the process closes before timing improves, move to Passed.",
+  },
   passed: {
     what: "The deal was evaluated and we chose not to proceed. Logging pass reasons is important — it builds our pattern recognition over time.",
     who: "N/A — deal is closed.",
@@ -193,15 +210,16 @@ const PROCESS = {
 };
 
 const DOC_STAGES  = ["Sourcing","Solo triage","Product ping","NDA","Triage memo","IC review","Deep diligence","Other"];
-const MA_TYPES    = ["Unclear","Component acquisition","Customer type acquisition","Both"];
+const MA_TYPES    = ["Unclear","Improve the Platform","Go Get Deep Customer Relationships","Both"];
+const PLATFORM_PILLARS = ["TBD","Demand","Supply","Data","Creative","Multiple"];
 const BU_SPONSORS = ["TBD","MBU","EBU","Platform"];
 const WAIT_ON     = ["None","Product team","CEO","CFO","BU sponsor","Banker","Legal"];
-const STAGE_ORDER = ["sourcing","triage","product_ping","nda","triage_memo","ic_review","deep_diligence","passed","closed"];
+const STAGE_ORDER = ["sourcing","triage","product_ping","nda","triage_memo","ic_review","deep_diligence","hold","passed","closed"];
 const NEXTS = {
-  sourcing:["triage","passed"], triage:["product_ping","nda","passed"],
-  product_ping:["nda","passed"], nda:["triage_memo","passed"],
-  triage_memo:["ic_review","passed"], ic_review:["deep_diligence","passed"],
-  deep_diligence:["closed","passed"], passed:[], closed:[],
+  sourcing:["triage","hold","passed"], triage:["product_ping","nda","hold","passed"],
+  product_ping:["nda","hold","passed"], nda:["triage_memo","hold","passed"],
+  triage_memo:["ic_review","hold","passed"], ic_review:["deep_diligence","hold","passed"],
+  deep_diligence:["closed","hold","passed"], hold:["sourcing","triage","passed"], passed:[], closed:[],
 };
 
 const inp = {width:"100%",padding:"8px 10px",borderRadius:6,fontSize:13,border:"1px solid #d0cec8",background:"#f7f6f3",color:"#1a1a18",boxSizing:"border-box",fontFamily:"inherit"};
@@ -210,6 +228,7 @@ const sel = {...inp, cursor:"pointer"};
 
 const blank = (p={}) => ({
   id: Date.now().toString(), atId: null, name:"", stage:"sourcing", maType:"Unclear", buSponsor:"TBD",
+  platformPillar:"TBD",
   source:"", banker:"", priceSignal:"", deckSummary:"", triageNotes:"", productPingNotes:"",
   triageMemoNotes:"", icNotes:"", passReason:"", waitingOn:"None",
   stageHistory:[], aiMessages:[], documents:[], driveFolderUrl:"",
@@ -275,7 +294,7 @@ function StagePopover({stageId, onClose}) {
 function PipelineBar({deals, active, onClick}) {
   const [expanded, setExpanded] = useState(null);
   const cnt = id => deals.filter(d=>d.stage===id).length;
-  const r1=STAGES.slice(0,4), r2=STAGES.slice(4,7), terms=[STAGES[8],STAGES[7]];
+  const r1=STAGES.slice(0,4), r2=STAGES.slice(4,7), terms=[STAGES[9],STAGES[8],STAGES[7]];
 
   const handleClick = id => { onClick(id); setExpanded(p=>p===id?null:id); };
 
@@ -312,7 +331,7 @@ function PipelineBar({deals, active, onClick}) {
         <div style={{width:1,background:"#d8d6ce",margin:"4px 8px",alignSelf:"stretch"}}/>
         <div style={{display:"flex",gap:4,flexShrink:0}}>{terms.map(s=><Box key={s.id} s={s} fw={62}/>)}</div>
       </div>
-      {deals.length>0&&<div style={{fontSize:11,color:"#9e9c96",marginTop:5}}>{deals.length} total · {deals.filter(d=>!["passed","closed"].includes(d.stage)).length} active · click a stage to filter and expand</div>}
+      {deals.length>0&&<div style={{fontSize:11,color:"#9e9c96",marginTop:5}}>{deals.length} total · {deals.filter(d=>!["passed","closed","hold"].includes(d.stage)).length} active · click a stage to filter and expand</div>}
       {expanded&&<StagePopover stageId={expanded} onClose={()=>setExpanded(null)}/>}
     </div>
   );
@@ -490,7 +509,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
             {[["source","Source","e.g. Atlas Technology Group"],["banker","Banker","e.g. Canaccord"],["priceSignal","Price signal","e.g. $15–20M"]].map(([k,l,p])=>(
               <div key={k}><Label>{l}</Label><input value={form[k]||""} onChange={e=>set(k,e.target.value)} placeholder={p} style={inp}/></div>
             ))}
-            {[["maType","M&A type",MA_TYPES],["buSponsor","BU sponsor",BU_SPONSORS],["waitingOn","Waiting on",WAIT_ON]].map(([k,l,opts])=>(
+            {[["maType","M&A type",MA_TYPES],["buSponsor","BU sponsor",BU_SPONSORS],["platformPillar","Platform pillar",PLATFORM_PILLARS],["waitingOn","Waiting on",WAIT_ON]].map(([k,l,opts])=>(
               <div key={k}><Label>{l}</Label><select value={form[k]} onChange={e=>set(k,e.target.value)} style={sel}>{opts.map(o=><option key={o}>{o}</option>)}</select></div>
             ))}
           </div>
@@ -503,7 +522,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
           </div>
           {[
             {key:"deckSummary",     label:"Deck / overview summary",   stage:"sourcing",     hint:"Key points from CIP or overview"},
-            {key:"triageNotes",     label:"Solo triage notes",          stage:"triage",       hint:"Type fit · market size · deal structure · red flags"},
+            {key:"triageNotes",     label:"Solo triage notes",          stage:"triage",       hint:"Platform improvement · customer relationships · composability · flywheel · team · revenue/margin"},
             {key:"productPingNotes",label:"Product ping notes",         stage:"product_ping", hint:"Build/buy/partner · composability · effort"},
             {key:"triageMemoNotes", label:"Triage memo notes",          stage:"triage_memo",  hint:"M&A type · fit · structure · risks · BU sponsor"},
             {key:"icNotes",         label:"IC notes",                   stage:"ic_review",    hint:"CEO · CFO · BU sponsor decision"},
@@ -657,7 +676,7 @@ function ProcessPage({onBack}) {
 // ── Analytics ──────────────────────────────────────────────────────────────────
 function Analytics({deals, onBack}) {
   const passed=deals.filter(d=>d.stage==="passed"),closed=deals.filter(d=>d.stage==="closed");
-  const active=deals.filter(d=>!["passed","closed"].includes(d.stage));
+  const active=deals.filter(d=>!["passed","closed","hold"].includes(d.stage));
   const waiting=deals.filter(d=>d.waitingOn&&d.waitingOn!=="None");
   const passFrom=id=>passed.filter(d=>(d.stageHistory||[]).some(h=>h.to==="passed"&&h.from===id)).length;
   return (
@@ -773,7 +792,7 @@ function App() {
   const toggleF = id => setFilter(f=>f===id?"active":id);
 
   const filtered = deals.filter(d=>{
-    const fOk = filter==="all"?true:filter==="active"?!["passed","closed"].includes(d.stage):filter==="waiting"?d.waitingOn&&d.waitingOn!=="None":d.stage===filter;
+    const fOk = filter==="all"?true:filter==="active"?!["passed","closed","hold"].includes(d.stage):filter==="waiting"?d.waitingOn&&d.waitingOn!=="None":filter==="hold"?d.stage==="hold":d.stage===filter;
     const sOk = !search||d.name.toLowerCase().includes(search.toLowerCase())||(d.deckSummary||"").toLowerCase().includes(search.toLowerCase());
     return fOk&&sOk;
   });
@@ -815,7 +834,7 @@ function App() {
       <PipelineBar deals={deals} active={filter} onClick={toggleF}/>
 
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-        {[{id:"active",label:"Active"},{id:"waiting",label:"Waiting on…"},{id:"passed",label:"Passed"},{id:"closed",label:"Closed"},{id:"all",label:"All"}].map(f=>(
+        {[{id:"active",label:"Active"},{id:"waiting",label:"Waiting on…"},{id:"hold",label:"Hold"},{id:"passed",label:"Passed"},{id:"closed",label:"Closed"},{id:"all",label:"All"}].map(f=>(
           <button key={f.id} onClick={()=>setFilter(f.id)} style={{padding:"4px 12px",borderRadius:20,fontSize:12,cursor:"pointer",background:filter===f.id?"#534AB7":"#f7f6f3",color:filter===f.id?"white":"#6b6963",border:filter===f.id?"none":"1px solid #d8d6ce",fontWeight:filter===f.id?600:400}}>{f.label}</button>
         ))}
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" style={{...inp,flex:1,minWidth:120,padding:"4px 10px",fontSize:12}}/>
@@ -833,6 +852,7 @@ function App() {
               </div>
               <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:5}}>
                 {d.maType!=="Unclear"&&<span style={{fontSize:11,color:"#6b6963"}}>{d.maType}</span>}
+                {d.platformPillar&&d.platformPillar!=="TBD"&&<span style={{fontSize:11,color:"#534AB7",fontWeight:600}}>{d.platformPillar}</span>}
                 {d.buSponsor!=="TBD"&&<span style={{fontSize:11,color:"#6b6963"}}>{d.buSponsor}</span>}
                 {d.source&&<span style={{fontSize:11,color:"#6b6963"}}>{d.source}</span>}
                 {d.documents?.length>0&&<span style={{fontSize:11,color:"#534AB7",fontWeight:600}}>{d.documents.length} doc{d.documents.length>1?"s":""}</span>}
