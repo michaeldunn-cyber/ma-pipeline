@@ -47,6 +47,7 @@ const toAT = deal => ({
   stageHistory:     JSON.stringify(deal.stageHistory || []),
   aiMessages:       JSON.stringify(deal.aiMessages || []),
   documents:        JSON.stringify(deal.documents || []),
+  commsLog:         JSON.stringify(deal.commsLog || []),
   createdAt:        deal.createdAt || new Date().toISOString(),
   updatedAt:        new Date().toISOString(),
 });
@@ -73,6 +74,7 @@ const fromAT = rec => ({
   stageHistory:     tryParse(rec.fields.stageHistory, []),
   aiMessages:       tryParse(rec.fields.aiMessages, []),
   documents:        tryParse(rec.fields.documents, []),
+  commsLog:         tryParse(rec.fields.commsLog, []),
   createdAt:        rec.fields.createdAt || rec.createdTime,
   updatedAt:        rec.fields.updatedAt || rec.createdTime,
 });
@@ -231,7 +233,7 @@ const blank = (p={}) => ({
   platformPillar:"TBD",
   source:"", banker:"", priceSignal:"", deckSummary:"", triageNotes:"", productPingNotes:"",
   triageMemoNotes:"", icNotes:"", passReason:"", waitingOn:"None",
-  stageHistory:[], aiMessages:[], documents:[], driveFolderUrl:"",
+  stageHistory:[], aiMessages:[], documents:[], commsLog:[], driveFolderUrl:"",
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...p,
 });
 
@@ -462,20 +464,122 @@ function AIChat({deal, onUpdate}) {
   );
 }
 
+// ── Comms log ─────────────────────────────────────────────────────────────────
+const COMMS_TYPES = ["Email","Call","Meeting","Other"];
+function CommsLog({deal, onChange}) {
+  const log = deal.commsLog || [];
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({type:"Email",counterparty:"",subject:"",notes:"",date:new Date().toISOString().slice(0,10)});
+  const typeColor = {Email:"#534AB7",Call:"#0F6E56",Meeting:"#854F0B",Other:"#5F5E5A"};
+  const typeBg   = {Email:"#EEEDFE",Call:"#E1F5EE",Meeting:"#FAEEDA",Other:"#F1EFE8"};
+  return (
+    <div>
+      {log.length === 0 && !adding && <div style={{fontSize:12,color:"#9e9c96",padding:"12px 0"}}>No communications logged yet.</div>}
+      {[...log].reverse().map((c,i) => (
+        <div key={i} style={{padding:"10px 12px",background:"#f7f6f3",border:"1px solid #e0ded6",borderRadius:8,marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+            <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:10,background:typeBg[c.type]||"#F1EFE8",color:typeColor[c.type]||"#5F5E5A"}}>{c.type}</span>
+            <span style={{fontSize:12,fontWeight:600,color:"#1a1a18"}}>{c.counterparty}</span>
+            <span style={{fontSize:11,color:"#9e9c96",marginLeft:"auto"}}>{new Date(c.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
+            <button onClick={()=>onChange(log.filter((_,j)=>j!==log.length-1-i))} style={{background:"none",border:"none",cursor:"pointer",fontSize:15,color:"#b8b6ae",lineHeight:1,padding:"0 2px"}}>×</button>
+          </div>
+          {c.subject && <div style={{fontSize:12,fontWeight:500,color:"#1a1a18",marginBottom:2}}>{c.subject}</div>}
+          {c.notes && <div style={{fontSize:12,color:"#6b6963",lineHeight:1.5}}>{c.notes}</div>}
+        </div>
+      ))}
+      {adding ? (
+        <div style={{background:"#f7f6f3",border:"1px solid #d8d6ce",borderRadius:8,padding:14,marginTop:6}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+            <div><Label>Type</Label>
+              <select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))} style={sel}>
+                {COMMS_TYPES.map(t=><option key={t}>{t}</option>)}
+              </select>
+            </div>
+            <div><Label>Date</Label>
+              <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>
+            </div>
+          </div>
+          <div style={{marginBottom:10}}><Label>Counterparty</Label><input value={form.counterparty} onChange={e=>setForm(f=>({...f,counterparty:e.target.value}))} placeholder="e.g. Chris Heasman, Canaccord" style={inp}/></div>
+          <div style={{marginBottom:10}}><Label>Subject / topic</Label><input value={form.subject} onChange={e=>setForm(f=>({...f,subject:e.target.value}))} placeholder="e.g. Initial outreach re: Project Graphite" style={inp}/></div>
+          <div style={{marginBottom:12}}><Label>Notes</Label><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Key points, outcomes, next steps…" style={ta}/></div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setAdding(false)} style={{padding:"6px 12px",borderRadius:6,fontSize:12,background:"none",border:"1px solid #d8d6ce",cursor:"pointer",color:"#6b6963"}}>Cancel</button>
+            <button onClick={()=>{if(!form.counterparty)return;onChange([...log,{...form,id:Date.now().toString()}]);setForm({type:"Email",counterparty:"",subject:"",notes:"",date:new Date().toISOString().slice(0,10)});setAdding(false);}} disabled={!form.counterparty} style={{padding:"6px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer",opacity:!form.counterparty?0.5:1}}>Log it</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={()=>setAdding(true)} style={{width:"100%",padding:8,borderRadius:8,fontSize:12,background:"none",border:"1px dashed #c8c6be",cursor:"pointer",color:"#9e9c96",marginTop:4}}>+ Log communication</button>
+      )}
+    </div>
+  );
+}
+
 // ── Deal detail ────────────────────────────────────────────────────────────────
 function DealDetail({deal, onSave, onBack, onDelete, saving}) {
   const [form,setForm]=useState({...deal});
   const [tab,setTab]=useState("details");
   const [confirmDel,setConfirmDel]=useState(false);
+  const [advanceModal,setAdvanceModal]=useState(null); // {to, label}
+  const [advanceCheck,setAdvanceCheck]=useState({comms:false,reason:false});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const nexts=NEXTS[form.stage]||[];
   const visible=id=>STAGE_ORDER.indexOf(form.stage)>=STAGE_ORDER.indexOf(id);
+
   const advance=to=>{
+    if(to==="passed"||to==="hold"){
+      setAdvanceCheck({comms:false,reason:false});
+      setAdvanceModal({to, label: to==="passed"?"Mark as passed":"Move to Hold"});
+    } else {
+      doAdvance(to);
+    }
+  };
+
+  const doAdvance=to=>{
     const h=[...(form.stageHistory||[]),{from:form.stage,to,at:new Date().toISOString()}];
     setForm(f=>({...f,stage:to,stageHistory:h}));
+    setAdvanceModal(null);
   };
+
+  const advanceOk = advanceCheck.comms && advanceCheck.reason;
+
   return (
-    <div style={{background:"white",minHeight:"100%",padding:18,boxSizing:"border-box",maxWidth:700,margin:"0 auto"}}>
+    <div style={{background:"white",minHeight:"100%",padding:18,boxSizing:"border-box",maxWidth:700,margin:"0 auto",position:"relative"}}>
+
+      {/* Pass / Hold confirmation modal */}
+      {advanceModal && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.35)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200}}>
+          <div style={{background:"white",borderRadius:12,padding:24,width:420,boxShadow:"0 4px 24px rgba(0,0,0,0.12)"}}>
+            <div style={{fontSize:15,fontWeight:600,color:"#1a1a18",marginBottom:6}}>{advanceModal.label}</div>
+            <div style={{fontSize:13,color:"#6b6963",marginBottom:20,lineHeight:1.6}}>Before closing this deal out, confirm the following:</div>
+            <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:24}}>
+              <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                <input type="checkbox" checked={advanceCheck.comms} onChange={e=>setAdvanceCheck(c=>({...c,comms:e.target.checked}))} style={{marginTop:2,width:"auto",flexShrink:0}}/>
+                <span style={{fontSize:13,color:"#1a1a18",lineHeight:1.5}}>
+                  External party has been notified
+                  {(form.commsLog||[]).length === 0 && <span style={{display:"block",fontSize:11,color:"#993C1D",marginTop:2}}>⚠ No communications logged on this deal yet</span>}
+                  {(form.commsLog||[]).length > 0 && <span style={{display:"block",fontSize:11,color:"#0F6E56",marginTop:2}}>✓ {form.commsLog.length} communication{form.commsLog.length>1?"s":""} logged</span>}
+                </span>
+              </label>
+              <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                <input type="checkbox" checked={advanceCheck.reason} onChange={e=>setAdvanceCheck(c=>({...c,reason:e.target.checked}))} style={{marginTop:2,width:"auto",flexShrink:0}}/>
+                <span style={{fontSize:13,color:"#1a1a18",lineHeight:1.5}}>
+                  {advanceModal.to==="passed" ? "Pass reason is documented" : "Hold reason is documented"}
+                  {advanceModal.to==="passed" && !form.passReason && <span style={{display:"block",fontSize:11,color:"#993C1D",marginTop:2}}>⚠ No pass reason entered yet — add one in Details before proceeding</span>}
+                  {advanceModal.to==="passed" && form.passReason && <span style={{display:"block",fontSize:11,color:"#0F6E56",marginTop:2}}>✓ Pass reason recorded</span>}
+                  {advanceModal.to==="hold" && <span style={{display:"block",fontSize:11,color:"#9e9c96",marginTop:2}}>Check triage notes for hold reasoning</span>}
+                </span>
+              </label>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button onClick={()=>setAdvanceModal(null)} style={{padding:"7px 14px",borderRadius:6,fontSize:12,background:"none",border:"1px solid #d8d6ce",cursor:"pointer",color:"#6b6963"}}>Cancel</button>
+              <button onClick={()=>doAdvance(advanceModal.to)} disabled={!advanceOk} style={{padding:"7px 16px",borderRadius:6,fontSize:12,fontWeight:600,background:advanceModal.to==="passed"?"#5F5E5A":"#185FA5",color:"white",border:"none",cursor:advanceOk?"pointer":"not-allowed",opacity:advanceOk?1:0.45}}>
+                {advanceModal.label}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
         <button onClick={onBack} style={{display:"flex",alignItems:"center",gap:5,background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#534AB7",padding:0,fontWeight:600}}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="#534AB7" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -499,7 +603,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
         </div>
       )}
       <div style={{display:"flex",borderBottom:"2px solid #e0ded6",marginBottom:16}}>
-        {[{id:"details",label:"Details"},{id:"dataroom",label:`Data room${form.documents?.length?` (${form.documents.length})`:""}`},{id:"ai",label:"AI assistant"}].map(t=>(
+        {[{id:"details",label:"Details"},{id:"dataroom",label:`Data room${form.documents?.length?` (${form.documents.length})`:""}`},{id:"comms",label:`Comms${form.commsLog?.length?` (${form.commsLog.length})`:""}`},{id:"ai",label:"AI assistant"}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?600:400,cursor:"pointer",background:"none",border:"none",borderBottom:tab===t.id?"3px solid #534AB7":"3px solid transparent",color:tab===t.id?"#534AB7":"#6b6963",marginBottom:-2}}>{t.label}</button>
         ))}
       </div>
@@ -542,6 +646,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
         </>
       )}
       {tab==="dataroom"&&<DataRoom deal={form} onChange={(docs,url)=>setForm(f=>({...f,documents:docs,...(url?{driveFolderUrl:url}:{})}))}/>}
+      {tab==="comms"&&<CommsLog deal={form} onChange={log=>setForm(f=>({...f,commsLog:log}))}/>}
       {tab==="ai"&&<AIChat deal={form} onUpdate={msgs=>setForm(f=>({...f,aiMessages:msgs}))}/>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:24,paddingTop:16,borderTop:"1px solid #e0ded6"}}>
         {confirmDel?(
