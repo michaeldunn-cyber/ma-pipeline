@@ -743,6 +743,176 @@ function Analytics({deals, onBack}) {
   );
 }
 
+
+// ── Weekly Report ─────────────────────────────────────────────────────────────
+function WeeklyReport({deals, onBack}) {
+  const [copied, setCopied] = React.useState(false);
+  const now = new Date();
+  const oneWeekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const ACTIVE_STAGES = ["sourcing","triage","product_ping","nda","triage_memo","ic_review","deep_diligence"];
+  const newThisWeek = deals.filter(d => new Date(d.createdAt) >= oneWeekAgo);
+  const movedThisWeek = deals.filter(d => d.stageHistory && d.stageHistory.some(h => new Date(h.at) >= oneWeekAgo));
+  const active = deals.filter(d => ACTIVE_STAGES.includes(d.stage));
+  const onHold = deals.filter(d => d.stage === "hold");
+  const passed = deals.filter(d => d.stage === "passed");
+  const closed = deals.filter(d => d.stage === "closed");
+  const needsAttention = deals.filter(d => d.waitingOn && d.waitingOn !== "None" && ACTIVE_STAGES.includes(d.stage));
+  const icPending = deals.filter(d => d.stage === "ic_review");
+  const weekStr = now.toLocaleDateString("en-US", {month:"long", day:"numeric", year:"numeric"});
+  const stageLabel = id => STAGES.find(s => s.id === id)?.label || id;
+
+  const narrative = () => {
+    const parts = [];
+    if (newThisWeek.length > 0) parts.push(newThisWeek.length + " new inbound" + (newThisWeek.length > 1 ? "s" : "") + " this week (" + newThisWeek.map(d => d.name||"Unnamed").join(", ") + ")");
+    else parts.push("No new inbounds this week");
+    if (movedThisWeek.length > 0) parts.push(movedThisWeek.length + " deal" + (movedThisWeek.length > 1 ? "s" : "") + " moved stage");
+    parts.push(active.length + " active deal" + (active.length !== 1 ? "s" : "") + " in pipeline");
+    if (needsAttention.length > 0) parts.push(needsAttention.length + " deal" + (needsAttention.length > 1 ? "s" : "") + " waiting on internal action");
+    if (icPending.length > 0) parts.push(icPending.length + " deal" + (icPending.length !== 1 ? "s" : "") + " pending IC review");
+    return parts.join(". ") + ".";
+  };
+
+  const generateText = () => {
+    const sep = "─".repeat(50);
+    let txt = "INFILLION M&A WEEKLY UPDATE — " + weekStr.toUpperCase() + "\n" + sep + "\n\n";
+    txt += "SUMMARY\n" + narrative() + "\n\n";
+    if (newThisWeek.length > 0) {
+      txt += "NEW THIS WEEK (" + newThisWeek.length + ")\n";
+      newThisWeek.forEach(d => {
+        txt += "• " + (d.name||"Unnamed") + " — " + stageLabel(d.stage) + (d.source ? " · " + d.source : "") + "\n";
+        if (d.deckSummary) txt += "  " + d.deckSummary.slice(0,120) + (d.deckSummary.length > 120 ? "…" : "") + "\n";
+      });
+      txt += "\n";
+    }
+    if (movedThisWeek.length > 0) {
+      txt += "STAGE MOVEMENTS\n";
+      movedThisWeek.forEach(d => {
+        (d.stageHistory||[]).filter(h => new Date(h.at) >= oneWeekAgo).forEach(h => {
+          txt += "• " + (d.name||"Unnamed") + ": " + stageLabel(h.from) + " → " + stageLabel(h.to) + "\n";
+        });
+      });
+      txt += "\n";
+    }
+    txt += "ACTIVE PIPELINE (" + active.length + ")\n";
+    if (active.length === 0) txt += "No active deals.\n";
+    else STAGES.filter(s => ACTIVE_STAGES.includes(s.id)).forEach(s => {
+      const inStage = active.filter(d => d.stage === s.id);
+      if (inStage.length > 0) txt += s.label + ": " + inStage.map(d => d.name||"Unnamed").join(", ") + "\n";
+    });
+    txt += "\n";
+    if (needsAttention.length > 0 || icPending.length > 0) {
+      txt += "NEEDS ATTENTION\n";
+      icPending.forEach(d => txt += "• " + (d.name||"Unnamed") + " — IC review pending\n");
+      needsAttention.forEach(d => txt += "• " + (d.name||"Unnamed") + " — Waiting on: " + d.waitingOn + "\n");
+      txt += "\n";
+    }
+    if (onHold.length > 0) {
+      txt += "ON HOLD (" + onHold.length + ")\n";
+      onHold.forEach(d => txt += "• " + (d.name||"Unnamed") + (d.source ? " — " + d.source : "") + "\n");
+      txt += "\n";
+    }
+    if (passed.length > 0) {
+      txt += "PASSED (" + passed.length + ")\n";
+      passed.forEach(d => txt += "• " + (d.name||"Unnamed") + (d.passReason ? " — " + d.passReason.slice(0,80) : "") + "\n");
+    }
+    return txt;
+  };
+
+  const copy = () => {
+    navigator.clipboard.writeText(generateText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  };
+
+  const s12b = {fontSize:12,fontWeight:700,color:"#1a1a18",marginBottom:10,display:"flex",alignItems:"center",gap:8};
+  const badge = (bg) => ({background:bg,color:"white",borderRadius:10,padding:"1px 8px",fontSize:11});
+  const card = (bg,border) => ({padding:"8px 12px",background:bg,border:"1px solid "+border,borderRadius:8,marginBottom:6,fontSize:13});
+
+  return (
+    React.createElement("div", {style:{background:"white",minHeight:"100%",padding:18,maxWidth:700,margin:"0 auto"}},
+      React.createElement("div", {style:{display:"flex",alignItems:"center",gap:10,marginBottom:18}},
+        React.createElement("button", {onClick:onBack,style:{display:"flex",alignItems:"center",gap:5,background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#534AB7",padding:0,fontWeight:600}},
+          React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("path",{d:"M10 3L5 8L10 13",stroke:"#534AB7",strokeWidth:"1.8",strokeLinecap:"round",strokeLinejoin:"round"})),
+          "Pipeline"
+        ),
+        React.createElement("div", {style:{fontSize:15,fontWeight:600,color:"#1a1a18"}}, "Weekly report"),
+        React.createElement("div", {style:{flex:1}}),
+        React.createElement("button", {onClick:copy,style:{padding:"6px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:copied?"#EAF3DE":"#534AB7",color:copied?"#27500A":"white",border:"none",cursor:"pointer"}}, copied ? "✓ Copied" : "Copy to clipboard")
+      ),
+      React.createElement("div", {style:{background:"#EEEDFE",border:"1px solid #534AB744",borderRadius:10,padding:"14px 16px",marginBottom:20}},
+        React.createElement("div", {style:{fontSize:11,fontWeight:700,color:"#534AB7",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}, "Week of " + weekStr),
+        React.createElement("div", {style:{fontSize:13,color:"#3C3489",lineHeight:1.7}}, narrative())
+      ),
+      React.createElement("div", {style:{marginBottom:20}},
+        React.createElement("div", {style:s12b}, "New this week", React.createElement("span", {style:badge("#534AB7")}, newThisWeek.length)),
+        newThisWeek.length === 0
+          ? React.createElement("div", {style:{fontSize:12,color:"#9e9c96",padding:"10px 0"}}, "No new deals this week.")
+          : newThisWeek.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#f7f6f3","#e0ded6")},
+              React.createElement("div", {style:{display:"flex",alignItems:"center",gap:8,marginBottom:4}},
+                React.createElement("span", {style:{fontSize:13,fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
+                React.createElement(Tag, {id:d.stage})
+              ),
+              d.source && React.createElement("div", {style:{fontSize:11,color:"#6b6963",marginBottom:3}}, d.source),
+              d.deckSummary && React.createElement("div", {style:{fontSize:12,color:"#6b6963",lineHeight:1.5}}, d.deckSummary.slice(0,120) + (d.deckSummary.length>120?"…":""))
+            ))
+      ),
+      React.createElement("div", {style:{marginBottom:20}},
+        React.createElement("div", {style:s12b}, "Stage movements", React.createElement("span", {style:badge("#0F6E56")}, movedThisWeek.length)),
+        movedThisWeek.length === 0
+          ? React.createElement("div", {style:{fontSize:12,color:"#9e9c96",padding:"10px 0"}}, "No stage movements this week.")
+          : movedThisWeek.flatMap(d =>
+              (d.stageHistory||[]).filter(h => new Date(h.at) >= oneWeekAgo).map((h,i) =>
+                React.createElement("div", {key:d.atId+i,style:{...card("#f7f6f3","#e0ded6"),display:"flex",alignItems:"center",gap:10}},
+                  React.createElement("span", {style:{fontSize:13,fontWeight:600,color:"#1a1a18",flex:1}}, d.name||"Unnamed"),
+                  React.createElement(Tag, {id:h.from}),
+                  React.createElement("span", {style:{fontSize:11,color:"#9e9c96"}}, "→"),
+                  React.createElement(Tag, {id:h.to})
+                )
+              )
+            )
+      ),
+      React.createElement("div", {style:{marginBottom:20}},
+        React.createElement("div", {style:s12b}, "Active pipeline", React.createElement("span", {style:badge("#185FA5")}, active.length)),
+        active.length === 0
+          ? React.createElement("div", {style:{fontSize:12,color:"#9e9c96",padding:"10px 0"}}, "No active deals.")
+          : React.createElement("div", {style:{border:"1px solid #e0ded6",borderRadius:8,overflow:"hidden"}},
+              STAGES.filter(s => ACTIVE_STAGES.includes(s.id)).map(s => {
+                const inStage = active.filter(d => d.stage === s.id);
+                if (inStage.length === 0) return null;
+                return React.createElement("div", {key:s.id,style:{display:"flex",alignItems:"center",padding:"8px 12px",borderBottom:"1px solid #e8e6de"}},
+                  React.createElement("div", {style:{width:140,flexShrink:0}}, React.createElement(Tag, {id:s.id})),
+                  React.createElement("div", {style:{flex:1,fontSize:13,color:"#1a1a18"}}, inStage.map(d=>d.name||"Unnamed").join(", "))
+                );
+              })
+            )
+      ),
+      (needsAttention.length > 0 || icPending.length > 0) && React.createElement("div", {style:{marginBottom:20}},
+        React.createElement("div", {style:{...s12b,color:"#993C1D"}}, "Needs attention", React.createElement("span", {style:badge("#993C1D")}, needsAttention.length + icPending.length)),
+        icPending.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#FAECE7","#993C1D33")},
+          React.createElement("span", {style:{fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
+          React.createElement("span", {style:{color:"#712B13",marginLeft:8}}, "IC review pending")
+        )),
+        needsAttention.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#FAECE7","#993C1D33")},
+          React.createElement("span", {style:{fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
+          React.createElement("span", {style:{color:"#712B13",marginLeft:8}}, "Waiting on: " + d.waitingOn)
+        ))
+      ),
+      onHold.length > 0 && React.createElement("div", {style:{marginBottom:20}},
+        React.createElement("div", {style:s12b}, "On hold", React.createElement("span", {style:badge("#185FA5")}, onHold.length)),
+        onHold.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#E6F1FB","#185FA533")},
+          React.createElement("span", {style:{fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
+          d.source && React.createElement("span", {style:{color:"#6b6963",marginLeft:8}}, d.source)
+        ))
+      ),
+      passed.length > 0 && React.createElement("div", {style:{marginBottom:20}},
+        React.createElement("div", {style:s12b}, "Passed", React.createElement("span", {style:badge("#5F5E5A")}, passed.length)),
+        passed.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#F1EFE8","#5F5E5A33")},
+          React.createElement("div", {style:{fontWeight:600,color:"#1a1a18",marginBottom:2}}, d.name||"Unnamed"),
+          d.passReason && React.createElement("div", {style:{fontSize:12,color:"#6b6963"}}, d.passReason.slice(0,100) + (d.passReason.length>100?"…":""))
+        ))
+      )
+    )
+  );
+}
+
 // ── Main app ───────────────────────────────────────────────────────────────────
 function App() {
   const [deals,setDeals]   = useState([]);
@@ -815,6 +985,7 @@ function App() {
   if (view.page==="gmail")     return <GmailPicker onSelect={p=>{setView({page:"list"});createDeal(p);}} onBack={()=>setView({page:"list"})}/>;
   if (view.page==="analytics") return <Analytics deals={deals} onBack={()=>setView({page:"list"})}/>;
   if (view.page==="process")   return <ProcessPage onBack={()=>setView({page:"list"})}/>;
+  if (view.page==="weekly")    return <WeeklyReport deals={deals} onBack={()=>setView({page:"list"})}/>;
 
   return (
     <div style={{padding:16,fontFamily:"inherit",maxWidth:700,margin:"0 auto",background:"white",minHeight:"100%"}}>
@@ -825,6 +996,7 @@ function App() {
         </div>
         <div style={{display:"flex",gap:6}}>
           <button onClick={()=>setView({page:"process"})} style={{padding:"6px 11px",borderRadius:6,fontSize:12,background:"#f7f6f3",color:"#6b6963",border:"1px solid #d8d6ce",cursor:"pointer"}}>📋 Process</button>
+          <button onClick={()=>setView({page:"weekly"})} style={{padding:"6px 11px",borderRadius:6,fontSize:12,background:"#f7f6f3",color:"#6b6963",border:"1px solid #d8d6ce",cursor:"pointer"}}>📊 Weekly</button>
           <button onClick={()=>setView({page:"analytics"})} style={{padding:"6px 11px",borderRadius:6,fontSize:12,background:"#f7f6f3",color:"#6b6963",border:"1px solid #d8d6ce",cursor:"pointer"}}>Analytics</button>
           <button onClick={()=>setView({page:"gmail"})} style={{padding:"6px 11px",borderRadius:6,fontSize:12,fontWeight:600,background:"#EEEDFE",color:"#3C3489",border:"1px solid #534AB744",cursor:"pointer"}}>+ Gmail</button>
           <button onClick={()=>createDeal()} disabled={saving} style={{padding:"6px 11px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer",opacity:saving?0.6:1}}>+ New deal</button>
