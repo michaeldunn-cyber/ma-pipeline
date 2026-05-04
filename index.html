@@ -38,6 +38,8 @@ const toAT = deal => ({
   source:           deal.source || "",
   banker:           deal.banker || "",
   priceSignal:      deal.priceSignal || "",
+  annualRevenue:    deal.annualRevenue || "",
+  annualEbitda:     deal.annualEbitda || "",
   waitingOn:        deal.waitingOn || "None",
   driveFolderUrl:   deal.driveFolderUrl || "",
   deckSummary:      deal.deckSummary || "",
@@ -68,6 +70,8 @@ const fromAT = rec => ({
   source:           rec.fields.source || "",
   banker:           rec.fields.banker || "",
   priceSignal:      rec.fields.priceSignal || "",
+  annualRevenue:    rec.fields.annualRevenue || "",
+  annualEbitda:     rec.fields.annualEbitda || "",
   waitingOn:        rec.fields.waitingOn || "None",
   driveFolderUrl:   rec.fields.driveFolderUrl || "",
   deckSummary:      rec.fields.deckSummary || "",
@@ -238,7 +242,7 @@ const sel = {...inp, cursor:"pointer"};
 const blank = (p={}) => ({
   id: Date.now().toString(), atId: null, name:"", stage:"sourcing", maType:"Unclear", buSponsor:"TBD",
   platformPillar:"TBD", ndaStatus:"None", ndaUrl:"",
-  source:"", banker:"", priceSignal:"", deckSummary:"", triageNotes:"", productPingNotes:"",
+  source:"", banker:"", priceSignal:"", annualRevenue:"", annualEbitda:"", deckSummary:"", triageNotes:"", productPingNotes:"",
   triageMemoNotes:"", icNotes:"", passReason:"", waitingOn:"None",
   stageHistory:[], aiMessages:[], documents:[], commsLog:[], driveFolderUrl:"",
   briefData:{ companySnapshot:"", revenue:"", ebitda:"", estValuation:"", grossMargin:"", customKpis:[{label:"",value:""},{label:"",value:""}], thesis:"", strategicFit:"", pros:"", risks:"", openQuestions:"", nextSteps:"" },
@@ -513,6 +517,8 @@ Platform pillar: ${deal.platformPillar}
 Source: ${deal.source}
 Banker: ${deal.banker}
 Price signal: ${deal.priceSignal||"Unknown"}
+Annual revenue: ${deal.annualRevenue||"Unknown"}
+Annual EBITDA: ${deal.annualEbitda||"Unknown"}
 
 DEAL INFORMATION:
 ${context||"No additional information available yet."}
@@ -541,34 +547,41 @@ For customKpis, include 2-4 deal-specific metrics beyond the standard financial 
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514", max_tokens:1500, messages:[{role:"user",content:prompt}]})
       });
+      if (!res.ok) throw new Error(`API error ${res.status}`);
       const data = await res.json();
+      if (data.error) throw new Error(data.error.message);
       const text = data.content?.[0]?.text||"{}";
-      const clean = text.replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(clean);
+      const clean = text.replace(/```json[\s\S]*?```/g, t => t.slice(7,-3)).replace(/```/g,"").trim();
+      const jsonMatch = clean.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) throw new Error("No JSON in response");
+      const parsed = JSON.parse(jsonMatch[0]);
+      // Read current briefData fresh from deal prop
       const existing = deal.briefData || {};
-      // Merge — only overwrite fields that are currently empty
       const merged = {
         companySnapshot: existing.companySnapshot || parsed.companySnapshot || "",
-        revenue:         existing.revenue         || parsed.revenue         || "",
-        ebitda:          existing.ebitda           || parsed.ebitda          || "",
-        grossMargin:     existing.grossMargin      || parsed.grossMargin     || "",
-        estValuation:    existing.estValuation     || parsed.estValuation    || "",
+        revenue:         existing.revenue         || deal.annualRevenue || parsed.revenue || "",
+        ebitda:          existing.ebitda           || deal.annualEbitda  || parsed.ebitda  || "",
+        grossMargin:     existing.grossMargin      || parsed.grossMargin || "",
+        estValuation:    existing.estValuation     || deal.priceSignal   || parsed.estValuation || "",
         customKpis:      (existing.customKpis||[]).filter(k=>k.label).length > 0
                            ? existing.customKpis
-                           : parsed.customKpis || [{label:"",value:""},{label:"",value:""}],
-        thesis:          existing.thesis           || parsed.thesis          || "",
-        strategicFit:    existing.strategicFit     || parsed.strategicFit    || "",
-        pros:            existing.pros             || parsed.pros            || "",
-        risks:           existing.risks            || parsed.risks           || "",
-        openQuestions:   existing.openQuestions    || parsed.openQuestions   || "",
-        nextSteps:       existing.nextSteps        || parsed.nextSteps       || "",
+                           : (parsed.customKpis||[]).filter(k=>k&&k.label).length > 0
+                               ? parsed.customKpis.filter(k=>k&&k.label)
+                               : [{label:"",value:""},{label:"",value:""}],
+        thesis:          existing.thesis           || parsed.thesis        || "",
+        strategicFit:    existing.strategicFit     || parsed.strategicFit  || "",
+        pros:            existing.pros             || parsed.pros           || "",
+        risks:           existing.risks            || parsed.risks          || "",
+        openQuestions:   existing.openQuestions    || parsed.openQuestions  || "",
+        nextSteps:       existing.nextSteps        || parsed.nextSteps      || "",
       };
       onUpdate({briefData: merged});
       setAutofillStatus("Done");
       setTimeout(()=>setAutofillStatus(""),2000);
     } catch(e) {
-      setAutofillStatus("Error — try again");
-      setTimeout(()=>setAutofillStatus(""),3000);
+      console.error("Autofill error:", e);
+      setAutofillStatus("Error: " + (e.message||"try again"));
+      setTimeout(()=>setAutofillStatus(""),4000);
     }
     setAutofilling(false);
   };
@@ -700,7 +713,7 @@ For customKpis, include 2-4 deal-specific metrics beyond the standard financial 
       <div style={{marginBottom:14}}>
         <Label>Key metrics</Label>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
-          {[["revenue","Revenue","e.g. $9M ARR"],["ebitda","EBITDA","e.g. $1.4M"],["grossMargin","Gross margin","e.g. 64%"],["estValuation","Est. valuation","e.g. $40–70M"]].map(([k,l,p])=>(
+          {[["revenue","Revenue",deal.annualRevenue||"e.g. $9M ARR"],["ebitda","EBITDA",deal.annualEbitda||"e.g. $1.4M"],["grossMargin","Gross margin","e.g. 64%"],["estValuation","Est. valuation",deal.priceSignal||"e.g. $40–70M"]].map(([k,l,p])=>(
             <div key={k}>
               <Label>{l}</Label>
               <input value={b[k]||""} onChange={e=>set(k,e.target.value)} placeholder={p} style={inp}/>
@@ -900,7 +913,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
       {tab==="details"&&(
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
-            {[["source","Source","e.g. Atlas Technology Group"],["banker","Banker","e.g. Canaccord"],["priceSignal","Price signal","e.g. $15–20M"]].map(([k,l,p])=>(
+            {[["source","Source","e.g. Atlas Technology Group"],["banker","Banker","e.g. Canaccord"],["priceSignal","Price signal","e.g. $15–20M"],["annualRevenue","Annual revenue","e.g. $16M ARR"],["annualEbitda","EBITDA","e.g. $4M"]].map(([k,l,p])=>(
               <div key={k}><Label>{l}</Label><input value={form[k]||""} onChange={e=>set(k,e.target.value)} placeholder={p} style={inp}/></div>
             ))}
             {[["maType","M&A type",MA_TYPES],["buSponsor","BU sponsor",BU_SPONSORS],["platformPillar","Platform pillar",PLATFORM_PILLARS],["ndaStatus","NDA status",NDA_STATUS],["waitingOn","Waiting on",WAIT_ON]].map(([k,l,opts])=>(
@@ -1492,6 +1505,8 @@ function App() {
                 {d.ndaStatus&&d.ndaStatus!=="None"&&<span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:d.ndaStatus==="Signed"?"#EAF3DE":d.ndaStatus==="Infillion Version"||d.ndaStatus==="Counterparty Version"?"#FAEEDA":d.ndaStatus==="Requested"?"#EEEDFE":"#F1EFE8",color:d.ndaStatus==="Signed"?"#27500A":d.ndaStatus==="Infillion Version"||d.ndaStatus==="Counterparty Version"?"#633806":d.ndaStatus==="Requested"?"#3C3489":"#5F5E5A"}}>NDA {d.ndaStatus}</span>}
                 {d.buSponsor!=="TBD"&&<span style={{fontSize:11,color:"#6b6963"}}>{d.buSponsor}</span>}
                 {d.source&&<span style={{fontSize:11,color:"#6b6963"}}>{d.source}</span>}
+                {d.annualRevenue&&<span style={{fontSize:11,color:"#1a1a18",fontWeight:600}}>{d.annualRevenue}</span>}
+                {d.annualEbitda&&<span style={{fontSize:11,color:"#6b6963"}}>EBITDA {d.annualEbitda}</span>}
                 {d.documents?.length>0&&<span style={{fontSize:11,color:"#534AB7",fontWeight:600}}>{d.documents.length} doc{d.documents.length>1?"s":""}</span>}
                 {waiting&&<span style={{fontSize:11,color:"#854F0B",fontWeight:600}}>Waiting: {d.waitingOn}</span>}
               </div>
