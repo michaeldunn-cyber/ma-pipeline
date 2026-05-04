@@ -475,6 +475,8 @@ function AIChat({deal, onUpdate}) {
 // ── Deal brief ────────────────────────────────────────────────────────────────
 function DealBrief({deal, onUpdate}) {
   const b = deal.briefData || {};
+  const [autofilling, setAutofilling] = useState(false);
+  const [autofillStatus, setAutofillStatus] = useState("");
   const set = (k,v) => onUpdate({briefData:{...b,[k]:v}});
   const setKpi = (i,field,val) => {
     const kpis = [...(b.customKpis||[{label:"",value:""},{label:"",value:""}])];
@@ -488,6 +490,88 @@ function DealBrief({deal, onUpdate}) {
   };
   const kpis = b.customKpis||[{label:"",value:""},{label:"",value:""}];
   const stage = STAGES.find(x=>x.id===deal.stage)||STAGES[0];
+
+  const autofill = async () => {
+    setAutofilling(true);
+    setAutofillStatus("Reading deal data...");
+    const context = [
+      deal.deckSummary && `DECK SUMMARY:\n${deal.deckSummary}`,
+      deal.triageNotes && `SOLO TRIAGE NOTES:\n${deal.triageNotes}`,
+      deal.productPingNotes && `PRODUCT PING NOTES:\n${deal.productPingNotes}`,
+      deal.triageMemoNotes && `TRIAGE MEMO NOTES:\n${deal.triageMemoNotes}`,
+      deal.icNotes && `IC NOTES:\n${deal.icNotes}`,
+      deal.passReason && `PASS REASON:\n${deal.passReason}`,
+      (deal.aiMessages||[]).length > 0 && `AI CHAT HISTORY:\n${deal.aiMessages.filter(m=>m.role==="assistant").map(m=>m.content).join("\n\n")}`,
+    ].filter(Boolean).join("\n\n---\n\n");
+
+    const prompt = `You are an M&A analyst at Infillion (composable ad-tech). Based on the deal information below, populate an internal deal brief. Return ONLY valid JSON, no markdown, no explanation.
+
+Deal name: ${deal.name||"Unknown"}
+Stage: ${deal.stage}
+M&A type: ${deal.maType}
+Platform pillar: ${deal.platformPillar}
+Source: ${deal.source}
+Banker: ${deal.banker}
+Price signal: ${deal.priceSignal||"Unknown"}
+
+DEAL INFORMATION:
+${context||"No additional information available yet."}
+
+Return this exact JSON structure:
+{
+  "companySnapshot": "1-2 sentence description of what the company does, where it operates, who it serves",
+  "revenue": "revenue figure with label e.g. $9M ARR or $44M TTM or blank if unknown",
+  "ebitda": "EBITDA figure e.g. $1.4M or blank if unknown",
+  "grossMargin": "gross margin % e.g. 64% or blank if unknown",
+  "estValuation": "estimated valuation range e.g. $40-70M or blank if unknown",
+  "customKpis": [{"label": "KPI name", "value": "KPI value"}],
+  "thesis": "2-3 sentences on why Infillion is considering this — maps to M&A framework (Type 1/2, platform pillars, composability)",
+  "strategicFit": "2-3 sentences on how it plugs into Infillion stack and drives the flywheel across BUs",
+  "pros": "3-5 bullet points as plain text lines starting with - on key strengths",
+  "risks": "3-5 bullet points as plain text lines starting with - on key risks and concerns",
+  "openQuestions": "2-4 bullet points as plain text lines starting with - on what still needs to be evaluated",
+  "nextSteps": "2-3 bullet points as plain text lines starting with - on immediate next steps"
+}
+
+For customKpis, include 2-4 deal-specific metrics beyond the standard financial ones (e.g. MAUs, locations, clients, retention rate, publisher relationships). Only include metrics you have data for.`;
+
+    try {
+      setAutofillStatus("Generating brief...");
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({model:"claude-sonnet-4-20250514", max_tokens:1500, messages:[{role:"user",content:prompt}]})
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text||"{}";
+      const clean = text.replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(clean);
+      const existing = deal.briefData || {};
+      // Merge — only overwrite fields that are currently empty
+      const merged = {
+        companySnapshot: existing.companySnapshot || parsed.companySnapshot || "",
+        revenue:         existing.revenue         || parsed.revenue         || "",
+        ebitda:          existing.ebitda           || parsed.ebitda          || "",
+        grossMargin:     existing.grossMargin      || parsed.grossMargin     || "",
+        estValuation:    existing.estValuation     || parsed.estValuation    || "",
+        customKpis:      (existing.customKpis||[]).filter(k=>k.label).length > 0
+                           ? existing.customKpis
+                           : parsed.customKpis || [{label:"",value:""},{label:"",value:""}],
+        thesis:          existing.thesis           || parsed.thesis          || "",
+        strategicFit:    existing.strategicFit     || parsed.strategicFit    || "",
+        pros:            existing.pros             || parsed.pros            || "",
+        risks:           existing.risks            || parsed.risks           || "",
+        openQuestions:   existing.openQuestions    || parsed.openQuestions   || "",
+        nextSteps:       existing.nextSteps        || parsed.nextSteps       || "",
+      };
+      onUpdate({briefData: merged});
+      setAutofillStatus("Done");
+      setTimeout(()=>setAutofillStatus(""),2000);
+    } catch(e) {
+      setAutofillStatus("Error — try again");
+      setTimeout(()=>setAutofillStatus(""),3000);
+    }
+    setAutofilling(false);
+  };
 
   const printBrief = () => {
     const date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
@@ -598,9 +682,14 @@ function DealBrief({deal, onUpdate}) {
 
   return (
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <div style={{fontSize:12,color:"#6b6963",lineHeight:1.5}}>Build an internal brief to share with stakeholders. Click "Print / Save PDF" to generate a clean one-pager.</div>
-        <button onClick={printBrief} style={{flexShrink:0,marginLeft:12,padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>Print / Save PDF</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:10}}>
+        <div style={{fontSize:12,color:"#6b6963",lineHeight:1.5,flex:1}}>Build an internal brief to share with stakeholders. Click "AI autofill" to populate from deal data, then refine. Click "Print / Save PDF" to generate a clean one-pager.</div>
+        <div style={{display:"flex",gap:8,flexShrink:0}}>
+          <button onClick={autofill} disabled={autofilling} style={{padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:autofillStatus==="Done"?"#EAF3DE":autofillStatus==="Error — try again"?"#FAECE7":"#EEEDFE",color:autofillStatus==="Done"?"#27500A":autofillStatus==="Error — try again"?"#712B13":"#3C3489",border:"none",cursor:autofilling?"not-allowed":"pointer",opacity:autofilling?0.7:1}}>
+            {autofilling ? autofillStatus : autofillStatus==="Done" ? "✓ Done" : "AI autofill"}
+          </button>
+          <button onClick={printBrief} style={{padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>Print / Save PDF</button>
+        </div>
       </div>
 
       <div style={{marginBottom:14}}>
