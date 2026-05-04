@@ -50,6 +50,7 @@ const toAT = deal => ({
   aiMessages:       JSON.stringify(deal.aiMessages || []),
   documents:        JSON.stringify(deal.documents || []),
   commsLog:         JSON.stringify(deal.commsLog || []),
+  briefData:        JSON.stringify(deal.briefData || {}),
   createdAt:        deal.createdAt || new Date().toISOString(),
   updatedAt:        new Date().toISOString(),
 });
@@ -79,6 +80,7 @@ const fromAT = rec => ({
   aiMessages:       tryParse(rec.fields.aiMessages, []),
   documents:        tryParse(rec.fields.documents, []),
   commsLog:         tryParse(rec.fields.commsLog, []),
+  briefData:        tryParse(rec.fields.briefData, {}),
   createdAt:        rec.fields.createdAt || rec.createdTime,
   updatedAt:        rec.fields.updatedAt || rec.createdTime,
 });
@@ -239,6 +241,7 @@ const blank = (p={}) => ({
   source:"", banker:"", priceSignal:"", deckSummary:"", triageNotes:"", productPingNotes:"",
   triageMemoNotes:"", icNotes:"", passReason:"", waitingOn:"None",
   stageHistory:[], aiMessages:[], documents:[], commsLog:[], driveFolderUrl:"",
+  briefData:{ companySnapshot:"", revenue:"", ebitda:"", estValuation:"", grossMargin:"", customKpis:[{label:"",value:""},{label:"",value:""}], thesis:"", strategicFit:"", pros:"", risks:"", openQuestions:"", nextSteps:"" },
   createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...p,
 });
 
@@ -469,6 +472,199 @@ function AIChat({deal, onUpdate}) {
   );
 }
 
+// ── Deal brief ────────────────────────────────────────────────────────────────
+function DealBrief({deal, onUpdate}) {
+  const b = deal.briefData || {};
+  const set = (k,v) => onUpdate({briefData:{...b,[k]:v}});
+  const setKpi = (i,field,val) => {
+    const kpis = [...(b.customKpis||[{label:"",value:""},{label:"",value:""}])];
+    kpis[i] = {...kpis[i],[field]:val};
+    onUpdate({briefData:{...b,customKpis:kpis}});
+  };
+  const addKpi = () => onUpdate({briefData:{...b,customKpis:[...(b.customKpis||[]),{label:"",value:""}]}});
+  const removeKpi = i => {
+    const kpis = (b.customKpis||[]).filter((_,j)=>j!==i);
+    onUpdate({briefData:{...b,customKpis:kpis}});
+  };
+  const kpis = b.customKpis||[{label:"",value:""},{label:"",value:""}];
+  const stage = STAGES.find(x=>x.id===deal.stage)||STAGES[0];
+
+  const printBrief = () => {
+    const date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+    const kpiRows = kpis.filter(k=>k.label).map(k=>`<tr><td>${k.label}</td><td><strong>${k.value||"TBD"}</strong></td></tr>`).join("");
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+    <title>${deal.name||"Deal"} - Internal Brief</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; color: #1a1a18; padding: 40px; max-width: 760px; margin: 0 auto; }
+      .header { border-bottom: 2px solid #1a1a18; padding-bottom: 14px; margin-bottom: 20px; }
+      .header h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+      .header-meta { display: flex; gap: 20px; font-size: 11px; color: #6b6963; margin-top: 6px; flex-wrap: wrap; }
+      .confidential { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; color: #993C1D; text-transform: uppercase; margin-bottom: 4px; }
+      .stage-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; background: ${stage.light}; color: ${stage.dark}; border: 1px solid ${stage.color}44; }
+      .section { margin-bottom: 20px; }
+      .section-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #6b6963; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e0ded6; }
+      .snapshot { font-size: 13px; line-height: 1.7; color: #1a1a18; }
+      .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .kpi-box { background: #f7f6f3; border: 1px solid #e0ded6; border-radius: 6px; padding: 10px 12px; }
+      .kpi-value { font-size: 18px; font-weight: 700; color: #1a1a18; }
+      .kpi-label { font-size: 10px; color: #6b6963; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .prose { font-size: 13px; line-height: 1.7; color: #1a1a18; white-space: pre-wrap; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .pros-box { background: #EAF3DE; border: 1px solid #3B6D1133; border-radius: 6px; padding: 12px; }
+      .risks-box { background: #FAECE7; border: 1px solid #993C1D33; border-radius: 6px; padding: 12px; }
+      .box-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+      .pros-box .box-title { color: #27500A; }
+      .risks-box .box-title { color: #712B13; }
+      .process-row { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+      .process-item { background: #f7f6f3; border: 1px solid #e0ded6; border-radius: 4px; padding: 4px 10px; }
+      .process-label { font-size: 10px; color: #9e9c96; text-transform: uppercase; letter-spacing: 0.05em; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+    <div class="header">
+      <div class="confidential">Confidential — Internal Use Only</div>
+      <h1>${deal.name||"Unnamed Deal"}</h1>
+      <div style="margin-top:6px"><span class="stage-badge">${stage.label}</span>${deal.ndaStatus&&deal.ndaStatus!=="None"?`<span style="margin-left:8px;font-size:11px;font-weight:600;color:#27500A">NDA ${deal.ndaStatus}</span>`:""}</div>
+      <div class="header-meta">
+        <span>Prepared by Corp Dev</span>
+        <span>${date}</span>
+        ${deal.banker?`<span>Banker: ${deal.banker}</span>`:""}
+        ${deal.maType&&deal.maType!=="Unclear"?`<span>${deal.maType}</span>`:""}
+        ${deal.platformPillar&&deal.platformPillar!=="TBD"?`<span>Pillar: ${deal.platformPillar}</span>`:""}
+      </div>
+    </div>
+
+    ${b.companySnapshot?`<div class="section">
+      <div class="section-title">Company snapshot</div>
+      <div class="snapshot">${b.companySnapshot}</div>
+    </div>`:""}
+
+    <div class="section">
+      <div class="section-title">Key metrics</div>
+      <div class="kpi-grid">
+        ${b.revenue?`<div class="kpi-box"><div class="kpi-value">${b.revenue}</div><div class="kpi-label">Revenue</div></div>`:""}
+        ${b.ebitda?`<div class="kpi-box"><div class="kpi-value">${b.ebitda}</div><div class="kpi-label">EBITDA</div></div>`:""}
+        ${b.grossMargin?`<div class="kpi-box"><div class="kpi-value">${b.grossMargin}</div><div class="kpi-label">Gross margin</div></div>`:""}
+        ${b.estValuation?`<div class="kpi-box"><div class="kpi-value">${b.estValuation}</div><div class="kpi-label">Est. valuation</div></div>`:""}
+        ${kpis.filter(k=>k.label).map(k=>`<div class="kpi-box"><div class="kpi-value">${k.value||"TBD"}</div><div class="kpi-label">${k.label}</div></div>`).join("")}
+      </div>
+    </div>
+
+    ${b.thesis?`<div class="section">
+      <div class="section-title">Deal thesis</div>
+      <div class="prose">${b.thesis}</div>
+    </div>`:""}
+
+    ${b.strategicFit?`<div class="section">
+      <div class="section-title">Strategic fit</div>
+      <div class="prose">${b.strategicFit}</div>
+    </div>`:""}
+
+    ${(b.pros||b.risks)?`<div class="section">
+      <div class="section-title">Considerations</div>
+      <div class="two-col">
+        ${b.pros?`<div class="pros-box"><div class="box-title">Strengths</div><div class="prose" style="font-size:12px">${b.pros}</div></div>`:""}
+        ${b.risks?`<div class="risks-box"><div class="box-title">Risks and open questions</div><div class="prose" style="font-size:12px">${b.risks}</div></div>`:""}
+      </div>
+    </div>`:""}
+
+    ${b.openQuestions?`<div class="section">
+      <div class="section-title">What we still need to evaluate</div>
+      <div class="prose">${b.openQuestions}</div>
+    </div>`:""}
+
+    ${b.nextSteps?`<div class="section">
+      <div class="section-title">Next steps</div>
+      <div class="prose">${b.nextSteps}</div>
+    </div>`:""}
+
+    <div class="section">
+      <div class="section-title">Process status</div>
+      <div class="process-row">
+        <div class="process-item"><div class="process-label">Stage</div><strong>${stage.label}</strong></div>
+        ${deal.ndaStatus&&deal.ndaStatus!=="None"?`<div class="process-item"><div class="process-label">NDA</div><strong>${deal.ndaStatus}</strong></div>`:""}
+        ${deal.banker?`<div class="process-item"><div class="process-label">Banker</div><strong>${deal.banker}</strong></div>`:""}
+        ${deal.buSponsor&&deal.buSponsor!=="TBD"?`<div class="process-item"><div class="process-label">BU sponsor</div><strong>${deal.buSponsor}</strong></div>`:""}
+        ${deal.priceSignal?`<div class="process-item"><div class="process-label">Price signal</div><strong>${deal.priceSignal}</strong></div>`:""}
+      </div>
+    </div>
+    </body></html>`;
+
+    const w = window.open("","_blank");
+    w.document.write(html);
+    w.document.close();
+    setTimeout(()=>w.print(), 500);
+  };
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={{fontSize:12,color:"#6b6963",lineHeight:1.5}}>Build an internal brief to share with stakeholders. Click "Print / Save PDF" to generate a clean one-pager.</div>
+        <button onClick={printBrief} style={{flexShrink:0,marginLeft:12,padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>Print / Save PDF</button>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <Label hint="1-2 sentence company description">Company snapshot</Label>
+        <textarea value={b.companySnapshot||""} onChange={e=>set("companySnapshot",e.target.value)} placeholder="Brief description of what the company does, where it operates, and who it serves." style={ta}/>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <Label>Key metrics</Label>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
+          {[["revenue","Revenue","e.g. $9M ARR"],["ebitda","EBITDA","e.g. $1.4M"],["grossMargin","Gross margin","e.g. 64%"],["estValuation","Est. valuation","e.g. $40–70M"]].map(([k,l,p])=>(
+            <div key={k}>
+              <Label>{l}</Label>
+              <input value={b[k]||""} onChange={e=>set(k,e.target.value)} placeholder={p} style={inp}/>
+            </div>
+          ))}
+        </div>
+        <div style={{marginBottom:6}}>
+          <Label hint="deal-specific KPIs (e.g. Publisher relationships, MAUs, Locations)">Custom KPIs</Label>
+          {kpis.map((kpi,i)=>(
+            <div key={i} style={{display:"flex",gap:8,marginBottom:6,alignItems:"center"}}>
+              <input value={kpi.label} onChange={e=>setKpi(i,"label",e.target.value)} placeholder="Label (e.g. Pub relationships)" style={{...inp,flex:2}}/>
+              <input value={kpi.value} onChange={e=>setKpi(i,"value",e.target.value)} placeholder="Value (e.g. 200+)" style={{...inp,flex:1}}/>
+              <button onClick={()=>removeKpi(i)} style={{background:"none",border:"none",cursor:"pointer",fontSize:16,color:"#b8b6ae",padding:"0 4px",flexShrink:0}}>×</button>
+            </div>
+          ))}
+          <button onClick={addKpi} style={{fontSize:11,color:"#534AB7",background:"none",border:"none",cursor:"pointer",padding:0,fontWeight:600}}>+ Add KPI</button>
+        </div>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <Label hint="why Infillion is considering this — maps to M&A framework">Deal thesis</Label>
+        <textarea value={b.thesis||""} onChange={e=>set("thesis",e.target.value)} placeholder="e.g. Strong Type 1 fit for the Data pillar — the data harmonization engine is composable and directly additive post-Catalina..." style={ta}/>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <Label hint="how it plugs into Infillion's stack and drives the flywheel">Strategic fit</Label>
+        <textarea value={b.strategicFit||""} onChange={e=>set("strategicFit",e.target.value)} placeholder="e.g. Harmonization engine feeds MediaMath targeting, Catalina purchase attribution closes the loop..." style={ta}/>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+        <div>
+          <Label hint="what's working in favor of this deal">Strengths</Label>
+          <textarea value={b.pros||""} onChange={e=>set("pros",e.target.value)} placeholder="Key strengths and reasons to proceed..." style={{...ta,minHeight:100}}/>
+        </div>
+        <div>
+          <Label hint="risks, concerns, and deal-specific issues">Risks and concerns</Label>
+          <textarea value={b.risks||""} onChange={e=>set("risks",e.target.value)} placeholder="Key risks, structural concerns, red flags..." style={{...ta,minHeight:100}}/>
+        </div>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <Label hint="gaps we need to close before advancing">What we still need to evaluate</Label>
+        <textarea value={b.openQuestions||""} onChange={e=>set("openQuestions",e.target.value)} placeholder="e.g. Bureau reseller agreement portability, key person retention, tech diligence on data pipeline..." style={ta}/>
+      </div>
+
+      <div style={{marginBottom:14}}>
+        <Label>Next steps</Label>
+        <textarea value={b.nextSteps||""} onChange={e=>set("nextSteps",e.target.value)} placeholder="e.g. Product ping with Marcos, call with banker to probe structure, NDA review..." style={ta}/>
+      </div>
+    </div>
+  );
+}
+
 // ── Comms log ─────────────────────────────────────────────────────────────────
 const COMMS_TYPES = ["Email","Call","Meeting","Other"];
 function CommsLog({deal, onChange}) {
@@ -608,7 +804,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
         </div>
       )}
       <div style={{display:"flex",borderBottom:"2px solid #e0ded6",marginBottom:16}}>
-        {[{id:"details",label:"Details"},{id:"dataroom",label:`Data room${form.documents?.length?` (${form.documents.length})`:""}`},{id:"comms",label:`Comms${form.commsLog?.length?` (${form.commsLog.length})`:""}`},{id:"ai",label:"AI assistant"}].map(t=>(
+        {[{id:"details",label:"Details"},{id:"dataroom",label:`Data room${form.documents?.length?` (${form.documents.length})`:""}`},{id:"comms",label:`Comms${form.commsLog?.length?` (${form.commsLog.length})`:""}`},{id:"brief",label:"Deal brief"},{id:"ai",label:"AI assistant"}].map(t=>(
           <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:"8px 16px",fontSize:13,fontWeight:tab===t.id?600:400,cursor:"pointer",background:"none",border:"none",borderBottom:tab===t.id?"3px solid #534AB7":"3px solid transparent",color:tab===t.id?"#534AB7":"#6b6963",marginBottom:-2}}>{t.label}</button>
         ))}
       </div>
@@ -659,6 +855,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
       )}
       {tab==="dataroom"&&<DataRoom deal={form} onChange={(docs,url)=>setForm(f=>({...f,documents:docs,...(url?{driveFolderUrl:url}:{})}))}/>}
       {tab==="comms"&&<CommsLog deal={form} onChange={log=>setForm(f=>({...f,commsLog:log}))}/>}
+      {tab==="brief"&&<DealBrief deal={form} onUpdate={updates=>setForm(f=>({...f,...updates}))}/>}
       {tab==="ai"&&<AIChat deal={form} onUpdate={msgs=>setForm(f=>({...f,aiMessages:msgs}))}/>}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:24,paddingTop:16,borderTop:"1px solid #e0ded6"}}>
         {confirmDel?(
