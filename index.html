@@ -33,6 +33,8 @@ const toAT = deal => ({
   maType:           deal.maType || "Unclear",
   buSponsor:        deal.buSponsor || "TBD",
   platformPillar:   deal.platformPillar || "TBD",
+  ndaStatus:        deal.ndaStatus || "None",
+  ndaUrl:           deal.ndaUrl || "",
   source:           deal.source || "",
   banker:           deal.banker || "",
   priceSignal:      deal.priceSignal || "",
@@ -60,6 +62,8 @@ const fromAT = rec => ({
   maType:           rec.fields.maType || "Unclear",
   buSponsor:        rec.fields.buSponsor || "TBD",
   platformPillar:   rec.fields.platformPillar || "TBD",
+  ndaStatus:        rec.fields.ndaStatus || "None",
+  ndaUrl:           rec.fields.ndaUrl || "",
   source:           rec.fields.source || "",
   banker:           rec.fields.banker || "",
   priceSignal:      rec.fields.priceSignal || "",
@@ -214,6 +218,7 @@ const PROCESS = {
 const DOC_STAGES  = ["Sourcing","Solo triage","Product ping","NDA","Triage memo","IC review","Deep diligence","Other"];
 const MA_TYPES    = ["Unclear","Improve the Platform","Go Get Deep Customer Relationships","Both"];
 const PLATFORM_PILLARS = ["TBD","Demand","Supply","Data","Creative","Multiple"];
+const NDA_STATUS = ["None","Requested","Infillion Version","Counterparty Version","Signed"];
 const BU_SPONSORS = ["TBD","MBU","EBU","Platform"];
 const WAIT_ON     = ["None","Product team","CEO","CFO","BU sponsor","Banker","Legal"];
 const STAGE_ORDER = ["sourcing","triage","product_ping","nda","triage_memo","ic_review","deep_diligence","hold","passed","closed"];
@@ -230,7 +235,7 @@ const sel = {...inp, cursor:"pointer"};
 
 const blank = (p={}) => ({
   id: Date.now().toString(), atId: null, name:"", stage:"sourcing", maType:"Unclear", buSponsor:"TBD",
-  platformPillar:"TBD",
+  platformPillar:"TBD", ndaStatus:"None", ndaUrl:"",
   source:"", banker:"", priceSignal:"", deckSummary:"", triageNotes:"", productPingNotes:"",
   triageMemoNotes:"", icNotes:"", passReason:"", waitingOn:"None",
   stageHistory:[], aiMessages:[], documents:[], commsLog:[], driveFolderUrl:"",
@@ -613,7 +618,7 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
             {[["source","Source","e.g. Atlas Technology Group"],["banker","Banker","e.g. Canaccord"],["priceSignal","Price signal","e.g. $15–20M"]].map(([k,l,p])=>(
               <div key={k}><Label>{l}</Label><input value={form[k]||""} onChange={e=>set(k,e.target.value)} placeholder={p} style={inp}/></div>
             ))}
-            {[["maType","M&A type",MA_TYPES],["buSponsor","BU sponsor",BU_SPONSORS],["platformPillar","Platform pillar",PLATFORM_PILLARS],["waitingOn","Waiting on",WAIT_ON]].map(([k,l,opts])=>(
+            {[["maType","M&A type",MA_TYPES],["buSponsor","BU sponsor",BU_SPONSORS],["platformPillar","Platform pillar",PLATFORM_PILLARS],["ndaStatus","NDA status",NDA_STATUS],["waitingOn","Waiting on",WAIT_ON]].map(([k,l,opts])=>(
               <div key={k}><Label>{l}</Label><select value={form[k]} onChange={e=>set(k,e.target.value)} style={sel}>{opts.map(o=><option key={o}>{o}</option>)}</select></div>
             ))}
           </div>
@@ -622,6 +627,13 @@ function DealDetail({deal, onSave, onBack, onDelete, saving}) {
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
               <input value={form.driveFolderUrl||""} onChange={e=>set("driveFolderUrl",e.target.value)} placeholder="https://drive.google.com/drive/folders/…" style={inp}/>
               {form.driveFolderUrl&&<a href={form.driveFolderUrl} target="_blank" rel="noreferrer" style={{flexShrink:0,padding:"7px 12px",borderRadius:6,fontSize:12,fontWeight:600,background:"#EAF3DE",color:"#27500A",border:"1px solid #3B6D1144",textDecoration:"none",whiteSpace:"nowrap"}}>Open folder</a>}
+            </div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <Label hint="link to signed NDA document">NDA document</Label>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input value={form.ndaUrl||""} onChange={e=>set("ndaUrl",e.target.value)} placeholder="https://drive.google.com/…" style={inp}/>
+              {form.ndaUrl&&<a href={form.ndaUrl} target="_blank" rel="noreferrer" style={{flexShrink:0,padding:"7px 12px",borderRadius:6,fontSize:12,fontWeight:600,background:"#EEEDFE",color:"#3C3489",border:"1px solid #534AB744",textDecoration:"none",whiteSpace:"nowrap"}}>View NDA</a>}
             </div>
           </div>
           {[
@@ -725,7 +737,34 @@ function GmailPicker({onSelect, onBack}) {
 // ── Process page ───────────────────────────────────────────────────────────────
 function ProcessPage({onBack}) {
   const [activeStage,setActiveStage]=useState("sourcing");
+  const [view,setView]=useState("stages"); // "stages" or "templates"
   const s=STAGES.find(x=>x.id===activeStage), p=PROCESS[activeStage];
+
+  const PRODUCT_PING_TEMPLATE = `Subject: New Inbound | [Product Ping] [Deal Name] | [One-line descriptor] | [Revenue] | [Urgency]
+
+Hi [CPO name],
+
+Attaching the teaser. Wanted your read before we go further with [Banker].
+
+What it is:
+• [What the company does in one line]
+• [Key distribution or customer relationships]
+• [Notable technology or data asset]
+• [Team size, HQ, revenue — frame as tech/distribution or revenue acquisition]
+
+Why we're considering:
+• [Strategic fit against Infillion's platform pillars]
+• [Composability angle — how does it plug into our stack]
+• [Flywheel or cross-BU value]
+
+Questions for you:
+1. [Product-specific question 1]
+2. [Product-specific question 2]
+3. [Build vs. buy vs. partner question if relevant]
+
+Thanks,
+Michael`;
+
   return (
     <div style={{background:"white",minHeight:"100%",padding:18,maxWidth:700,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
@@ -735,45 +774,79 @@ function ProcessPage({onBack}) {
         </button>
         <div style={{fontSize:15,fontWeight:600,color:"#1a1a18"}}>M&A process playbook</div>
       </div>
-      <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:20}}>
-        {STAGES.map(st=>(
-          <button key={st.id} onClick={()=>setActiveStage(st.id)} style={{padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",background:activeStage===st.id?st.color:st.light,color:activeStage===st.id?"white":st.dark,border:`1px solid ${st.color}${activeStage===st.id?"":"55"}`}}>{st.label}</button>
+
+      <div style={{display:"flex",borderBottom:"2px solid #e0ded6",marginBottom:20}}>
+        {[{id:"stages",label:"Stage guide"},{id:"templates",label:"Email templates"}].map(t=>(
+          <button key={t.id} onClick={()=>setView(t.id)} style={{padding:"8px 16px",fontSize:13,fontWeight:view===t.id?600:400,cursor:"pointer",background:"none",border:"none",borderBottom:view===t.id?"3px solid #534AB7":"3px solid transparent",color:view===t.id?"#534AB7":"#6b6963",marginBottom:-2}}>{t.label}</button>
         ))}
       </div>
-      {s&&p&&(
-        <div style={{border:`1px solid ${s.color}33`,borderRadius:12,overflow:"hidden"}}>
-          <div style={{background:s.light,padding:"14px 18px",borderBottom:`1px solid ${s.color}33`}}>
-            <div style={{fontSize:16,fontWeight:700,color:s.dark}}>{s.label}</div>
-            <div style={{fontSize:13,color:s.dark,opacity:0.8,marginTop:4,lineHeight:1.5}}>{p.what}</div>
-          </div>
-          <div style={{padding:18,display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:"#9e9c96",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Who's involved</div>
-              <div style={{fontSize:13,color:"#1a1a18",lineHeight:1.7,background:"#f7f6f3",borderRadius:8,padding:"10px 12px"}}>{p.who}</div>
+
+      {view==="stages" && <>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:20}}>
+          {STAGES.map(st=>(
+            <button key={st.id} onClick={()=>setActiveStage(st.id)} style={{padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",background:activeStage===st.id?st.color:st.light,color:activeStage===st.id?"white":st.dark,border:`1px solid ${st.color}${activeStage===st.id?"":"55"}`}}>{st.label}</button>
+          ))}
+        </div>
+        {s&&p&&(
+          <div style={{border:`1px solid ${s.color}33`,borderRadius:12,overflow:"hidden"}}>
+            <div style={{background:s.light,padding:"14px 18px",borderBottom:`1px solid ${s.color}33`}}>
+              <div style={{fontSize:16,fontWeight:700,color:s.dark}}>{s.label}</div>
+              <div style={{fontSize:13,color:s.dark,opacity:0.8,marginTop:4,lineHeight:1.5}}>{p.what}</div>
             </div>
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:"#9e9c96",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>What to do</div>
-              <ul style={{fontSize:13,color:"#1a1a18",lineHeight:1.8,paddingLeft:16}}>{p.todo.map((t,i)=><li key={i} style={{marginBottom:2}}>{t}</li>)}</ul>
-            </div>
-            <div style={{background:"#EAF3DE",borderRadius:8,padding:"10px 12px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#27500A",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>✓ Advance when</div>
-              <div style={{fontSize:13,color:"#27500A",lineHeight:1.6}}>{p.advance}</div>
-            </div>
-            {p.pass!=="N/A."&&(
-              <div style={{background:"#FAECE7",borderRadius:8,padding:"10px 12px"}}>
-                <div style={{fontSize:11,fontWeight:700,color:"#712B13",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>✗ Pass when</div>
-                <div style={{fontSize:13,color:"#712B13",lineHeight:1.6}}>{p.pass}</div>
+            <div style={{padding:18,display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:"#9e9c96",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Who's involved</div>
+                <div style={{fontSize:13,color:"#1a1a18",lineHeight:1.7,background:"#f7f6f3",borderRadius:8,padding:"10px 12px"}}>{p.who}</div>
               </div>
-            )}
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:"#9e9c96",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>What to do</div>
+                <ul style={{fontSize:13,color:"#1a1a18",lineHeight:1.8,paddingLeft:16}}>{p.todo.map((t,i)=><li key={i} style={{marginBottom:2}}>{t}</li>)}</ul>
+              </div>
+              <div style={{background:"#EAF3DE",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#27500A",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>✓ Advance when</div>
+                <div style={{fontSize:13,color:"#27500A",lineHeight:1.6}}>{p.advance}</div>
+              </div>
+              {p.pass!=="N/A."&&(
+                <div style={{background:"#FAECE7",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#712B13",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>✗ Pass when</div>
+                  <div style={{fontSize:13,color:"#712B13",lineHeight:1.6}}>{p.pass}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:16}}>
+          {(()=>{const idx=STAGES.findIndex(x=>x.id===activeStage),prev=STAGES[idx-1],next=STAGES[idx+1];return<>
+            {prev?<button onClick={()=>setActiveStage(prev.id)} style={{padding:"6px 14px",borderRadius:6,fontSize:12,background:"#f7f6f3",border:"1px solid #d8d6ce",cursor:"pointer",color:"#6b6963"}}>← {prev.label}</button>:<div/>}
+            {next&&<button onClick={()=>setActiveStage(next.id)} style={{padding:"6px 14px",borderRadius:6,fontSize:12,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>{next.label} →</button>}
+          </>})()}
+        </div>
+      </>}
+
+      {view==="templates" && (
+        <div>
+          <div style={{marginBottom:8,fontSize:14,fontWeight:600,color:"#1a1a18"}}>Product ping template</div>
+          <div style={{fontSize:12,color:"#6b6963",marginBottom:12,lineHeight:1.6}}>
+            Use this format when sending a deal to the CPO for a product read. Keep it scannable. Subject line should give CPO everything they need to prioritize before opening.
+          </div>
+          <div style={{marginBottom:16,padding:"12px 14px",background:"#f7f6f3",border:"1px solid #e0ded6",borderRadius:8}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#534AB7",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Subject line format</div>
+            <div style={{fontSize:13,color:"#1a1a18",fontFamily:"monospace",lineHeight:1.8}}>
+              New Inbound | [Product Ping] [Deal Name] | [Descriptor] | [Revenue] | [Urgency]
+            </div>
+            <div style={{fontSize:11,color:"#9e9c96",marginTop:8,lineHeight:1.7}}>
+              Example: New Inbound | [Product Ping] Project Zenith | CTV Interactive, $1.9M Rev | Low Urgency
+            </div>
+          </div>
+          <div style={{position:"relative"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#534AB7",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Email body template</div>
+            <pre style={{fontSize:12,color:"#1a1a18",background:"#f7f6f3",border:"1px solid #e0ded6",borderRadius:8,padding:14,whiteSpace:"pre-wrap",lineHeight:1.8,fontFamily:"inherit"}}>
+              {PRODUCT_PING_TEMPLATE}
+            </pre>
+            <button onClick={()=>navigator.clipboard.writeText(PRODUCT_PING_TEMPLATE)} style={{marginTop:10,padding:"6px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>Copy template</button>
           </div>
         </div>
       )}
-      <div style={{display:"flex",justifyContent:"space-between",marginTop:16}}>
-        {(()=>{const idx=STAGES.findIndex(x=>x.id===activeStage),prev=STAGES[idx-1],next=STAGES[idx+1];return<>
-          {prev?<button onClick={()=>setActiveStage(prev.id)} style={{padding:"6px 14px",borderRadius:6,fontSize:12,background:"#f7f6f3",border:"1px solid #d8d6ce",cursor:"pointer",color:"#6b6963"}}>← {prev.label}</button>:<div/>}
-          {next&&<button onClick={()=>setActiveStage(next.id)} style={{padding:"6px 14px",borderRadius:6,fontSize:12,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>{next.label} →</button>}
-        </>})()}
-      </div>
     </div>
   );
 }
@@ -1130,6 +1203,7 @@ function App() {
               <div style={{display:"flex",gap:10,flexWrap:"wrap",marginTop:5}}>
                 {d.maType!=="Unclear"&&<span style={{fontSize:11,color:"#6b6963"}}>{d.maType}</span>}
                 {d.platformPillar&&d.platformPillar!=="TBD"&&<span style={{fontSize:11,color:"#534AB7",fontWeight:600}}>{d.platformPillar}</span>}
+                {d.ndaStatus&&d.ndaStatus!=="None"&&<span style={{fontSize:11,fontWeight:700,padding:"1px 7px",borderRadius:10,background:d.ndaStatus==="Signed"?"#EAF3DE":d.ndaStatus==="Infillion Version"||d.ndaStatus==="Counterparty Version"?"#FAEEDA":d.ndaStatus==="Requested"?"#EEEDFE":"#F1EFE8",color:d.ndaStatus==="Signed"?"#27500A":d.ndaStatus==="Infillion Version"||d.ndaStatus==="Counterparty Version"?"#633806":d.ndaStatus==="Requested"?"#3C3489":"#5F5E5A"}}>NDA {d.ndaStatus}</span>}
                 {d.buSponsor!=="TBD"&&<span style={{fontSize:11,color:"#6b6963"}}>{d.buSponsor}</span>}
                 {d.source&&<span style={{fontSize:11,color:"#6b6963"}}>{d.source}</span>}
                 {d.documents?.length>0&&<span style={{fontSize:11,color:"#534AB7",fontWeight:600}}>{d.documents.length} doc{d.documents.length>1?"s":""}</span>}
