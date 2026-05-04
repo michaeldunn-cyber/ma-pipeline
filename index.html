@@ -478,20 +478,23 @@ function AIChat({deal, onUpdate}) {
 
 // ── Deal brief ────────────────────────────────────────────────────────────────
 function DealBrief({deal, onUpdate}) {
-  const b = deal.briefData || {};
+  const EMPTY_BRIEF = {companySnapshot:"",revenue:"",ebitda:"",grossMargin:"",estValuation:"",customKpis:[{label:"",value:""},{label:"",value:""}],thesis:"",strategicFit:"",pros:"",risks:"",openQuestions:"",nextSteps:""};
+  const [b, setB] = useState({...EMPTY_BRIEF,...(deal.briefData||{})});
   const [autofilling, setAutofilling] = useState(false);
   const [autofillStatus, setAutofillStatus] = useState("");
-  const set = (k,v) => onUpdate({briefData:{...b,[k]:v}});
+
+  const update = (newB) => {
+    setB(newB);
+    onUpdate({briefData: newB});
+  };
+  const set = (k,v) => update({...b,[k]:v});
   const setKpi = (i,field,val) => {
     const kpis = [...(b.customKpis||[{label:"",value:""},{label:"",value:""}])];
     kpis[i] = {...kpis[i],[field]:val};
-    onUpdate({briefData:{...b,customKpis:kpis}});
+    update({...b,customKpis:kpis});
   };
-  const addKpi = () => onUpdate({briefData:{...b,customKpis:[...(b.customKpis||[]),{label:"",value:""}]}});
-  const removeKpi = i => {
-    const kpis = (b.customKpis||[]).filter((_,j)=>j!==i);
-    onUpdate({briefData:{...b,customKpis:kpis}});
-  };
+  const addKpi = () => update({...b,customKpis:[...(b.customKpis||[]),{label:"",value:""}]});
+  const removeKpi = i => update({...b,customKpis:(b.customKpis||[]).filter((_,j)=>j!==i)});
   const kpis = b.customKpis||[{label:"",value:""},{label:"",value:""}];
   const stage = STAGES.find(x=>x.id===deal.stage)||STAGES[0];
 
@@ -556,7 +559,7 @@ For customKpis, include 2-4 deal-specific metrics beyond the standard financial 
       if (!jsonMatch) throw new Error("No JSON in response");
       const parsed = JSON.parse(jsonMatch[0]);
       // Read current briefData fresh from deal prop
-      const existing = deal.briefData || {};
+      const existing = b;
       const merged = {
         companySnapshot: existing.companySnapshot || parsed.companySnapshot || "",
         revenue:         existing.revenue         || deal.annualRevenue || parsed.revenue || "",
@@ -575,7 +578,7 @@ For customKpis, include 2-4 deal-specific metrics beyond the standard financial 
         openQuestions:   existing.openQuestions    || parsed.openQuestions  || "",
         nextSteps:       existing.nextSteps        || parsed.nextSteps      || "",
       };
-      onUpdate({briefData: merged});
+      update(merged);
       setAutofillStatus("Done");
       setTimeout(()=>setAutofillStatus(""),2000);
     } catch(e) {
