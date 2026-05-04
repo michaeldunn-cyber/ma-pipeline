@@ -446,7 +446,7 @@ function AIChat({deal, onUpdate}) {
     const next=[...msgs,{role:"user",content:text}];
     onUpdate(next);setInput("");setLoading(true);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      const res=await fetch("https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/anthropic/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-20250514",max_tokens:1000,
         system:`You are an M&A analyst for Infillion (composable ad-tech). Framework: Type 1=composable component across BUs; Type 2=deep expertise in a customer type. Prefer limited cash upfront. MOS=dominant post-acquisition culture.\nDeal: ${deal.name||"Unknown"} | Stage: ${deal.stage} | Type: ${deal.maType} | BU: ${deal.buSponsor} | Price: ${deal.priceSignal||"none"}\nSummary: ${deal.deckSummary||"none"} | Triage: ${deal.triageNotes||"none"} | Product: ${deal.productPingNotes||"none"}\nBe direct, concise, commercially savvy.`,
         messages:next,
@@ -546,7 +546,7 @@ For customKpis, include 2-4 deal-specific metrics beyond the standard financial 
 
     try {
       setAutofillStatus("Generating brief...");
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/anthropic/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({model:"claude-sonnet-4-20250514", max_tokens:1500, messages:[{role:"user",content:prompt}]})
       });
@@ -991,7 +991,7 @@ function GmailPicker({onSelect, onBack}) {
   const search=async()=>{
     setLoading(true);setEmails([]);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,mcp_servers:[{type:"url",url:"https://gmail.mcp.claude.com/mcp",name:"Gmail"}],messages:[{role:"user",content:`Search Gmail for: "${query}", maxResults:15. Return ONLY a JSON array, no markdown: [{"messageId":"...","subject":"...","from":"...","date":"...","snippet":"..."}]`}]})});
+      const res=await fetch("https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/anthropic/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,mcp_servers:[{type:"url",url:"https://gmail.mcp.claude.com/mcp",name:"Gmail"}],messages:[{role:"user",content:`Search Gmail for: "${query}", maxResults:15. Return ONLY a JSON array, no markdown: [{"messageId":"...","subject":"...","from":"...","date":"...","snippet":"..."}]`}]})});
       const data=await res.json();
       const text=data.content?.find(b=>b.type==="text")?.text||"[]";
       const match=text.match(/\[[\s\S]*\]/);
@@ -1002,7 +1002,7 @@ function GmailPicker({onSelect, onBack}) {
   const pick=async(email)=>{
     setReading(email.messageId);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,mcp_servers:[{type:"url",url:"https://gmail.mcp.claude.com/mcp",name:"Gmail"}],messages:[{role:"user",content:`Read Gmail message ${email.messageId}. Return ONLY this JSON (no markdown): {"name":"company name","source":"sender or banker","banker":"banker firm or empty","maType":"Unclear|Component acquisition|Customer type acquisition|Both","priceSignal":"valuation or empty","deckSummary":"2-3 sentence summary"}`}]})});
+      const res=await fetch("https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/anthropic/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,mcp_servers:[{type:"url",url:"https://gmail.mcp.claude.com/mcp",name:"Gmail"}],messages:[{role:"user",content:`Read Gmail message ${email.messageId}. Return ONLY this JSON (no markdown): {"name":"company name","source":"sender or banker","banker":"banker firm or empty","maType":"Unclear|Component acquisition|Customer type acquisition|Both","priceSignal":"valuation or empty","deckSummary":"2-3 sentence summary"}`}]})});
       const data=await res.json();
       const text=data.content?.find(b=>b.type==="text")?.text||"{}";
       const match=text.replace(/```json|```/g,"").match(/\{[\s\S]*\}/);
