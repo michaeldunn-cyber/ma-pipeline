@@ -443,8 +443,10 @@ function AIChat({deal, onUpdate}) {
   const QUICK=["Does this fit our M&A framework?","Draft a Product ping","Draft banker outreach","Key risks?","Write triage memo","Diligence questions"];
   const send=async(text)=>{
     if(!text.trim()||loading)return;
-    const next=[...msgs,{role:"user",content:text}];
-    onUpdate(next);setInput("");setLoading(true);
+    const next=[...msgs,{role:"user",content:text},{role:"assistant",content:"AI features are currently unavailable. Anthropic API access is blocked by your IT administrator. All other CRM features work normally."}];
+    onUpdate(next);setInput("");
+    return;
+    setLoading(true);
     try{
       const res=await fetch("https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/anthropic/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
         model:"claude-sonnet-4-20250514",max_tokens:1000,
@@ -499,6 +501,9 @@ function DealBrief({deal, onUpdate}) {
   const stage = STAGES.find(x=>x.id===deal.stage)||STAGES[0];
 
   const autofill = async () => {
+    setAutofillStatus("AI features unavailable");
+    setTimeout(()=>setAutofillStatus(""),3000);
+    return;
     setAutofilling(true);
     setAutofillStatus("Reading deal data...");
     const context = [
@@ -702,7 +707,7 @@ For customKpis, include 2-4 deal-specific metrics beyond the standard financial 
         <div style={{fontSize:12,color:"#6b6963",lineHeight:1.5,flex:1}}>Build an internal brief to share with stakeholders. Click "AI autofill" to populate from deal data, then refine. Click "Print / Save PDF" to generate a clean one-pager.</div>
         <div style={{display:"flex",gap:8,flexShrink:0}}>
           <button type="button" onClick={e=>{e.preventDefault();e.stopPropagation();autofill();}} disabled={autofilling} style={{padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:autofillStatus==="Done"?"#EAF3DE":autofillStatus.startsWith("Error")?"#FAECE7":"#EEEDFE",color:autofillStatus==="Done"?"#27500A":autofillStatus.startsWith("Error")?"#712B13":"#3C3489",border:"none",cursor:autofilling?"not-allowed":"pointer",opacity:autofilling?0.7:1}}>
-            {autofilling ? autofillStatus : autofillStatus==="Done" ? "✓ Done" : "AI autofill"}
+            {autofilling ? autofillStatus : autofillStatus==="Done" ? "✓ Done" : autofillStatus==="AI features unavailable" ? "⚠ AI unavailable" : "AI autofill"}
           </button>
           <button type="button" onClick={e=>{e.preventDefault();e.stopPropagation();printBrief();}} style={{padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:"#534AB7",color:"white",border:"none",cursor:"pointer"}}>Print / Save PDF</button>
         </div>
