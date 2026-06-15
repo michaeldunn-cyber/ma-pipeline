@@ -1261,201 +1261,285 @@ function Analytics({deals, onBack}) {
 }
 
 
-// ── Weekly Report ─────────────────────────────────────────────────────────────
+// ── Weekly Draft Generator ────────────────────────────────────────────────────
 function WeeklyReport({deals, onBack}) {
-  const [copied, setCopied] = React.useState(false);
-  const now = new Date();
-  const oneWeekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
-  const ACTIVE_STAGES = ["sourcing","triage","product_ping","nda","triage_memo","ic_review","deep_diligence"];
-  const newThisWeek = deals.filter(d => new Date(d.createdAt) >= oneWeekAgo);
-  const movedThisWeek = deals.filter(d => d.stageHistory && d.stageHistory.some(h => new Date(h.at) >= oneWeekAgo));
-  const active = deals.filter(d => ACTIVE_STAGES.includes(d.stage));
-  const onHold = deals.filter(d => d.stage === "hold");
-  const passed = deals.filter(d => d.stage === "passed");
-  const closed = deals.filter(d => d.stage === "closed");
-  const needsAttention = deals.filter(d => d.waitingOn && d.waitingOn !== "None" && ACTIVE_STAGES.includes(d.stage));
-  const icPending = deals.filter(d => d.stage === "ic_review");
-  const weekStr = now.toLocaleDateString("en-US", {month:"long", day:"numeric", year:"numeric"});
-  const stageLabel = id => STAGES.find(s => s.id === id)?.label || id;
+  const PROXY    = "https://ma-pipeline-proxy.michael-dunn-b37.workers.dev/anthropic/v1/messages";
+  const ACTIVE   = ["sourcing","triage","product_ping","nda","triage_memo","ic_review","deep_diligence","hold"];
+  const today    = new Date();
+  const sevenAgo = new Date(today - 7*24*60*60*1000);
+  const weekStr  = today.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
 
-  const narrative = () => {
-    const parts = [];
-    if (newThisWeek.length > 0) parts.push(newThisWeek.length + " new inbound" + (newThisWeek.length > 1 ? "s" : "") + " this week (" + newThisWeek.map(d => d.name||"Unnamed").join(", ") + ")");
-    else parts.push("No new inbounds this week");
-    if (movedThisWeek.length > 0) parts.push(movedThisWeek.length + " deal" + (movedThisWeek.length > 1 ? "s" : "") + " moved stage");
-    parts.push(active.length + " active deal" + (active.length !== 1 ? "s" : "") + " in pipeline");
-    if (needsAttention.length > 0) parts.push(needsAttention.length + " deal" + (needsAttention.length > 1 ? "s" : "") + " waiting on internal action");
-    if (icPending.length > 0) parts.push(icPending.length + " deal" + (icPending.length !== 1 ? "s" : "") + " pending IC review");
-    return parts.join(". ") + ".";
-  };
+  const [step,       setStep]       = React.useState("idle");
+  const [qaItems,    setQaItems]    = React.useState([]);
+  const [draftItems, setDraftItems] = React.useState([]);
+  const [answers,    setAnswers]    = React.useState({});
+  const [error,      setError]      = React.useState("");
 
-  // QA flags — deals that need attention before sending
-  const noActivity = active.filter(d => {
-    if (!d.lastActivityDate) return true;
-    return new Date(d.lastActivityDate) < oneWeekAgo;
-  });
-  const noWeeklyNotes = active.filter(d => !d.weeklyNotes || d.weeklyNotes.trim() === "");
-  const noThesis = active.filter(d => !d.strategicThesis || d.strategicThesis.trim() === "");
-  const hasBlocker = active.filter(d => d.blocker && d.blocker.trim() !== "");
-  const qaFlags = [...new Set([...noActivity, ...noWeeklyNotes])];
+  const activeDeals = deals.filter(d => ACTIVE.includes(d.stage));
+  const isStale  = d => !d.lastActivityDate || new Date(d.lastActivityDate) < sevenAgo;
+  const noNotes  = d => !d.weeklyNotes || !d.weeklyNotes.trim();
+  const orphanBlock = d => d.blocker && d.blocker.trim() && (!d.blockerOwner || !d.blockerOwner.trim());
 
+  const dealPayload = activeDeals.map(d => ({
+    name:             d.name || "Unnamed",
+    stage:            d.stage,
+    maType:           d.maType,
+    strategicThesis:  d.strategicThesis || "",
+    weeklyNotes:      d.weeklyNotes || "",
+    lastActivityDate: d.lastActivityDate || "",
+    blocker:          d.blocker || "",
+    blockerOwner:     d.blockerOwner || "",
+    annualRevenue:    d.annualRevenue || "",
+    banker:           d.banker || "",
+    waitingOn:        d.waitingOn || "",
+    staleActivity:    isStale(d),
+    missingNotes:     noNotes(d),
+    orphanBlocker:    orphanBlock(d),
+  }));
 
-  const generateText = () => {
-    const sep = "─".repeat(50);
-    let txt = "INFILLION M&A WEEKLY UPDATE — " + weekStr.toUpperCase() + "\n" + sep + "\n\n";
-    txt += "SUMMARY\n" + narrative() + "\n\n";
-    if (newThisWeek.length > 0) {
-      txt += "NEW THIS WEEK (" + newThisWeek.length + ")\n";
-      newThisWeek.forEach(d => {
-        txt += "• " + (d.name||"Unnamed") + " — " + stageLabel(d.stage) + (d.source ? " · " + d.source : "") + "\n";
-        if (d.deckSummary) txt += "  " + d.deckSummary.slice(0,120) + (d.deckSummary.length > 120 ? "…" : "") + "\n";
-      });
-      txt += "\n";
-    }
-    if (movedThisWeek.length > 0) {
-      txt += "STAGE MOVEMENTS\n";
-      movedThisWeek.forEach(d => {
-        (d.stageHistory||[]).filter(h => new Date(h.at) >= oneWeekAgo).forEach(h => {
-          txt += "• " + (d.name||"Unnamed") + ": " + stageLabel(h.from) + " → " + stageLabel(h.to) + "\n";
-        });
-      });
-      txt += "\n";
-    }
-    txt += "ACTIVE PIPELINE (" + active.length + ")\n";
-    if (active.length === 0) txt += "No active deals.\n";
-    else STAGES.filter(s => ACTIVE_STAGES.includes(s.id)).forEach(s => {
-      const inStage = active.filter(d => d.stage === s.id);
-      if (inStage.length > 0) txt += s.label + ": " + inStage.map(d => d.name||"Unnamed").join(", ") + "\n";
+  const callAPI = async (userMsg) => {
+    const system = `You are a corporate development chief of staff at Infillion, a composable ad-tech company. Given structured deal data, produce two outputs as a JSON object:
+
+1. "qaQuestions": array of {dealName, question} for any deal where missingNotes is true, staleActivity is true, or orphanBlocker is true. Questions must be specific — reference the deal name, last known activity, banker names, and blocker context. Ask one focused question per deal.
+
+2. "draftItems": array of objects, one per deal, with keys: {dealName, status, thesis, whatsNew, nextStep, blocker}. Populate from the deal fields. Infer whatsNew from weeklyNotes (if blank, note it needs input). Infer nextStep from blocker, waitingOn, and stage. thesis comes from strategicThesis. status is a clean label for the stage. blocker is the blocker field or blank.
+
+Rules: No em dashes anywhere. Be direct and executive-ready. Rob (CEO) cares about WHY each deal is on the list and what the concrete next step is — not legal minutiae unless it is a material blocker. Return ONLY valid JSON, no preamble, no markdown fences.`;
+
+    const res = await fetch(PROXY, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 2500,
+        system,
+        messages: [{role:"user", content: userMsg}]
+      })
     });
-    txt += "\n";
-    if (needsAttention.length > 0 || icPending.length > 0) {
-      txt += "NEEDS ATTENTION\n";
-      icPending.forEach(d => txt += "• " + (d.name||"Unnamed") + " — IC review pending\n");
-      needsAttention.forEach(d => txt += "• " + (d.name||"Unnamed") + " — Waiting on: " + d.waitingOn + "\n");
-      txt += "\n";
-    }
-    if (onHold.length > 0) {
-      txt += "ON HOLD (" + onHold.length + ")\n";
-      onHold.forEach(d => txt += "• " + (d.name||"Unnamed") + (d.source ? " — " + d.source : "") + "\n");
-      txt += "\n";
-    }
-    if (passed.length > 0) {
-      txt += "PASSED (" + passed.length + ")\n";
-      passed.forEach(d => txt += "• " + (d.name||"Unnamed") + (d.passReason ? " — " + d.passReason.slice(0,80) : "") + "\n");
-    }
-    return txt;
+    if (!res.ok) throw new Error("API error " + res.status);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = (data.content?.[0]?.text || "{}").replace(/```json[\s\S]*?```|```/g,"").trim();
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("No JSON returned");
+    return JSON.parse(match[0]);
   };
 
-  const copy = () => {
-    navigator.clipboard.writeText(generateText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
+  const generate = async () => {
+    setStep("loading"); setError("");
+    try {
+      const msg = "Here are the active deals:\n\n" + JSON.stringify(dealPayload, null, 2);
+      const parsed = await callAPI(msg);
+      setQaItems(parsed.qaQuestions || []);
+      setDraftItems((parsed.draftItems || []).map(d => ({...d, _edited: false})));
+      setStep("qa");
+    } catch(e) {
+      setError("Error: " + e.message);
+      setStep("idle");
+    }
   };
 
-  const s12b = {fontSize:12,fontWeight:700,color:"#1a1a18",marginBottom:10,display:"flex",alignItems:"center",gap:8};
-  const badge = (bg) => ({background:bg,color:"white",borderRadius:10,padding:"1px 8px",fontSize:11});
-  const card = (bg,border) => ({padding:"8px 12px",background:bg,border:"1px solid "+border,borderRadius:8,marginBottom:6,fontSize:13});
+  const regenerate = async () => {
+    setStep("loading"); setError("");
+    try {
+      const flaggedNames = qaItems.map(q => q.dealName);
+      const answerBlock = Object.entries(answers).map(([k,v]) => `${k}: ${v}`).join("\n");
+      const msg = "Here are the active deals:\n\n" + JSON.stringify(dealPayload, null, 2)
+        + "\n\nAdditional context from Corp Dev answering QA questions:\n" + answerBlock
+        + "\n\nOnly revise draftItems for these deals (leave others unchanged): " + flaggedNames.join(", ");
+      const parsed = await callAPI(msg);
+      // Merge — only replace flagged deals
+      setDraftItems(prev => prev.map(existing => {
+        const updated = (parsed.draftItems || []).find(n => n.dealName === existing.dealName);
+        return updated && flaggedNames.includes(existing.dealName) ? {...updated, _edited: false} : existing;
+      }));
+      setQaItems([]);
+      setStep("done");
+    } catch(e) {
+      setError("Error: " + e.message);
+    }
+  };
+
+  const updateDraft = (idx, key, val) => {
+    setDraftItems(prev => prev.map((d,i) => i===idx ? {...d,[key]:val,_edited:true} : d));
+  };
+
+  const exportPDF = () => {
+    const w = window.open("","_blank");
+    const rows = draftItems.map(d => `
+      <div class="deal">
+        <div class="deal-header">
+          <span class="deal-name">${d.dealName||""}</span>
+          <span class="deal-status">${d.status||""}</span>
+        </div>
+        ${d.thesis ? `<div class="thesis">${d.thesis}</div>` : ""}
+        ${d.whatsNew ? `<div class="label">This week</div><div class="body">${d.whatsNew}</div>` : ""}
+        ${d.nextStep ? `<div class="label">Next step</div><div class="body">${d.nextStep}</div>` : ""}
+        ${d.blocker ? `<div class="label blocker-label">Blocker</div><div class="body blocker">${d.blocker}</div>` : ""}
+      </div>`).join("");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+    <title>Infillion M&A Weekly Update</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0;}
+      body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;color:#1a1a18;padding:40px;max-width:760px;margin:0 auto;}
+      .header{border-bottom:2px solid #1a1a18;padding-bottom:12px;margin-bottom:24px;}
+      .header h1{font-size:22px;font-weight:700;}
+      .header .meta{font-size:11px;color:#9e9c96;margin-top:4px;}
+      .deal{padding:16px 0;border-bottom:1px solid #e0ded6;}
+      .deal-header{display:flex;align-items:center;gap:10;margin-bottom:6px;}
+      .deal-name{font-size:15px;font-weight:700;}
+      .deal-status{font-size:11px;background:#EEEDFE;color:#3C3489;padding:2px 8px;border-radius:10px;font-weight:600;}
+      .thesis{font-size:12px;color:#534AB7;font-weight:600;margin-bottom:8px;}
+      .label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#9e9c96;margin-top:8px;margin-bottom:2px;}
+      .blocker-label{color:#993C1D;}
+      .body{font-size:13px;line-height:1.6;}
+      .blocker{color:#993C1D;}
+      @media print{body{padding:20px;}}
+    </style></head><body>
+    <div class="header">
+      <h1>Infillion M&A Weekly Update</h1>
+      <div class="meta">Week ending ${weekStr} &nbsp;|&nbsp; Prepared by Corp Dev &nbsp;|&nbsp; Confidential</div>
+    </div>
+    ${rows}
+    </body></html>`);
+    w.document.close();
+    setTimeout(()=>w.print(),500);
+  };
+
+  const statCount = (fn) => activeDeals.filter(fn).length;
+  const btnPrimary = {padding:"8px 18px",borderRadius:6,fontSize:12,fontWeight:600,border:"none",cursor:"pointer",background:"#534AB7",color:"white"};
+  const btnSecondary = {padding:"7px 14px",borderRadius:6,fontSize:12,fontWeight:600,border:"1px solid #d8d6ce",cursor:"pointer",background:"#f7f6f3",color:"#6b6963"};
 
   return (
-    React.createElement("div", {style:{background:"white",minHeight:"100%",padding:18,maxWidth:700,margin:"0 auto"}},
-      React.createElement("div", {style:{display:"flex",alignItems:"center",gap:10,marginBottom:18}},
-        React.createElement("button", {onClick:onBack,style:{display:"flex",alignItems:"center",gap:5,background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#534AB7",padding:0,fontWeight:600}},
-          React.createElement("svg",{width:16,height:16,viewBox:"0 0 16 16",fill:"none"},React.createElement("path",{d:"M10 3L5 8L10 13",stroke:"#534AB7",strokeWidth:"1.8",strokeLinecap:"round",strokeLinejoin:"round"})),
-          "Pipeline"
-        ),
-        React.createElement("div", {style:{fontSize:15,fontWeight:600,color:"#1a1a18"}}, "Weekly report"),
-        React.createElement("div", {style:{flex:1}}),
-        React.createElement("button", {onClick:copy,style:{padding:"6px 14px",borderRadius:6,fontSize:12,fontWeight:600,background:copied?"#EAF3DE":"#534AB7",color:copied?"#27500A":"white",border:"none",cursor:"pointer"}}, copied ? "✓ Copied" : "Copy to clipboard")
-      ),
-      React.createElement("div", {style:{background:"#EEEDFE",border:"1px solid #534AB744",borderRadius:10,padding:"14px 16px",marginBottom:20}},
-        React.createElement("div", {style:{fontSize:11,fontWeight:700,color:"#534AB7",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}, "Week of " + weekStr),
-        React.createElement("div", {style:{fontSize:13,color:"#3C3489",lineHeight:1.7}}, narrative())
-      ),
-      React.createElement("div", {style:{marginBottom:20}},
-        React.createElement("div", {style:s12b}, "New this week", React.createElement("span", {style:badge("#534AB7")}, newThisWeek.length)),
-        newThisWeek.length === 0
-          ? React.createElement("div", {style:{fontSize:12,color:"#9e9c96",padding:"10px 0"}}, "No new deals this week.")
-          : newThisWeek.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#f7f6f3","#e0ded6")},
-              React.createElement("div", {style:{display:"flex",alignItems:"center",gap:8,marginBottom:4}},
-                React.createElement("span", {style:{fontSize:13,fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
-                React.createElement(Tag, {id:d.stage})
-              ),
-              d.source && React.createElement("div", {style:{fontSize:11,color:"#6b6963",marginBottom:3}}, d.source),
-              d.deckSummary && React.createElement("div", {style:{fontSize:12,color:"#6b6963",lineHeight:1.5}}, d.deckSummary.slice(0,120) + (d.deckSummary.length>120?"…":""))
-            ))
-      ),
-      React.createElement("div", {style:{marginBottom:20}},
-        React.createElement("div", {style:s12b}, "Stage movements", React.createElement("span", {style:badge("#0F6E56")}, movedThisWeek.length)),
-        movedThisWeek.length === 0
-          ? React.createElement("div", {style:{fontSize:12,color:"#9e9c96",padding:"10px 0"}}, "No stage movements this week.")
-          : movedThisWeek.flatMap(d =>
-              (d.stageHistory||[]).filter(h => new Date(h.at) >= oneWeekAgo).map((h,i) =>
-                React.createElement("div", {key:d.atId+i,style:{...card("#f7f6f3","#e0ded6"),display:"flex",alignItems:"center",gap:10}},
-                  React.createElement("span", {style:{fontSize:13,fontWeight:600,color:"#1a1a18",flex:1}}, d.name||"Unnamed"),
-                  React.createElement(Tag, {id:h.from}),
-                  React.createElement("span", {style:{fontSize:11,color:"#9e9c96"}}, "→"),
-                  React.createElement(Tag, {id:h.to})
-                )
-              )
-            )
-      ),
-      React.createElement("div", {style:{marginBottom:20}},
-        React.createElement("div", {style:s12b}, "Active pipeline", React.createElement("span", {style:badge("#185FA5")}, active.length)),
-        active.length === 0
-          ? React.createElement("div", {style:{fontSize:12,color:"#9e9c96",padding:"10px 0"}}, "No active deals.")
-          : React.createElement("div", {style:{border:"1px solid #e0ded6",borderRadius:8,overflow:"hidden"}},
-              STAGES.filter(s => ACTIVE_STAGES.includes(s.id)).map(s => {
-                const inStage = active.filter(d => d.stage === s.id);
-                if (inStage.length === 0) return null;
-                return React.createElement("div", {key:s.id,style:{borderBottom:"1px solid #e8e6de"}},
-                  inStage.map(d => React.createElement("div", {key:d.atId||d.id,style:{display:"flex",alignItems:"flex-start",padding:"10px 12px",borderBottom:"1px solid #f0ede6"}},
-                    React.createElement("div", {style:{width:140,flexShrink:0,paddingTop:2}}, React.createElement(Tag, {id:s.id})),
-                    React.createElement("div", {style:{flex:1}},
-                      React.createElement("div", {style:{fontSize:13,fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
-                      d.strategicThesis && React.createElement("div", {style:{fontSize:12,color:"#534AB7",marginTop:2,lineHeight:1.5}}, d.strategicThesis),
-                      d.weeklyNotes && React.createElement("div", {style:{fontSize:11,color:"#6b6963",marginTop:3,lineHeight:1.5}}, d.weeklyNotes),
-                      d.blocker && React.createElement("div", {style:{fontSize:11,color:"#993C1D",marginTop:3,fontWeight:600}}, "Blocker: " + d.blocker + (d.blockerOwner ? " (" + d.blockerOwner + ")" : ""))
-                    )
-                  ))
-                );
-              })
-            )
-      ),
-      qaFlags.length > 0 && React.createElement("div", {style:{marginBottom:20,padding:"12px 14px",background:"#FAEEDA",border:"1px solid #854F0B33",borderRadius:8}},
-        React.createElement("div", {style:{fontSize:12,fontWeight:700,color:"#633806",marginBottom:8}}, "QA — review before sending"),
-        qaFlags.map(d => React.createElement("div", {key:d.atId||d.id,style:{fontSize:12,color:"#633806",marginBottom:4}},
-          React.createElement("span", {style:{fontWeight:600}}, d.name||"Unnamed"),
-          React.createElement("span", {style:{marginLeft:6}},
-            !d.weeklyNotes ? "no weekly notes" : "no activity logged this week"
-          )
-        ))
-      ),
-      (needsAttention.length > 0 || icPending.length > 0) && React.createElement("div", {style:{marginBottom:20}},
-        React.createElement("div", {style:{...s12b,color:"#993C1D"}}, "Needs attention", React.createElement("span", {style:badge("#993C1D")}, needsAttention.length + icPending.length)),
-        icPending.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#FAECE7","#993C1D33")},
-          React.createElement("span", {style:{fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
-          React.createElement("span", {style:{color:"#712B13",marginLeft:8}}, "IC review pending")
-        )),
-        needsAttention.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#FAECE7","#993C1D33")},
-          React.createElement("span", {style:{fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
-          React.createElement("span", {style:{color:"#712B13",marginLeft:8}}, "Waiting on: " + d.waitingOn)
-        ))
-      ),
-      onHold.length > 0 && React.createElement("div", {style:{marginBottom:20}},
-        React.createElement("div", {style:s12b}, "On hold", React.createElement("span", {style:badge("#185FA5")}, onHold.length)),
-        onHold.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#E6F1FB","#185FA533")},
-          React.createElement("span", {style:{fontWeight:600,color:"#1a1a18"}}, d.name||"Unnamed"),
-          d.source && React.createElement("span", {style:{color:"#6b6963",marginLeft:8}}, d.source)
-        ))
-      ),
-      passed.length > 0 && React.createElement("div", {style:{marginBottom:20}},
-        React.createElement("div", {style:s12b}, "Passed", React.createElement("span", {style:badge("#5F5E5A")}, passed.length)),
-        passed.map(d => React.createElement("div", {key:d.atId||d.id,style:card("#F1EFE8","#5F5E5A33")},
-          React.createElement("div", {style:{fontWeight:600,color:"#1a1a18",marginBottom:2}}, d.name||"Unnamed"),
-          d.passReason && React.createElement("div", {style:{fontSize:12,color:"#6b6963"}}, d.passReason.slice(0,100) + (d.passReason.length>100?"…":""))
-        ))
-      )
-    )
+    <div style={{background:"white",minHeight:"100%",padding:18,boxSizing:"border-box"}}>
+      {/* Nav */}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
+        <button onClick={onBack} style={{display:"flex",alignItems:"center",gap:5,background:"none",border:"none",cursor:"pointer",fontSize:13,color:"#534AB7",padding:0,fontWeight:600}}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8L10 13" stroke="#534AB7" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Pipeline
+        </button>
+        <div style={{fontSize:15,fontWeight:600,color:"#1a1a18"}}>Weekly draft</div>
+        <div style={{flex:1}}/>
+        <div style={{fontSize:11,color:"#9e9c96"}}>Week ending {weekStr}</div>
+      </div>
+
+      {/* Readiness bar */}
+      <div style={{display:"flex",gap:20,padding:"10px 14px",background:"#f7f6f3",border:"1px solid #e0ded6",borderRadius:8,marginBottom:20,flexWrap:"wrap"}}>
+        <span style={{fontSize:11,color:"#1a1a18"}}><b>{activeDeals.length}</b> active deals</span>
+        <span style={{fontSize:11,color:"#993C1D"}}><b>{statCount(noNotes)}</b> missing weekly notes</span>
+        <span style={{fontSize:11,color:"#854F0B"}}><b>{statCount(isStale)}</b> no activity this week</span>
+        <span style={{fontSize:11,color:"#534AB7"}}><b>{statCount(d=>d.blocker&&d.blocker.trim())}</b> blocked</span>
+      </div>
+
+      {/* Idle */}
+      {step==="idle"&&(
+        <div style={{textAlign:"center",padding:"48px 0"}}>
+          <div style={{fontSize:13,color:"#6b6963",maxWidth:440,margin:"0 auto 24px",lineHeight:1.7}}>
+            Reads active deals, generates QA questions for anything missing context, and drafts the full weekly update. Run on Thursday afternoon to leave time for Friday follow-ups.
+          </div>
+          {error&&<div style={{fontSize:12,color:"#993C1D",marginBottom:16,padding:"8px 12px",background:"#FAECE7",borderRadius:6,display:"inline-block"}}>{error}</div>}
+          <br/>
+          <button type="button" onClick={generate} style={btnPrimary}>Generate Thursday draft</button>
+        </div>
+      )}
+
+      {/* Loading */}
+      {step==="loading"&&(
+        <div style={{textAlign:"center",padding:"64px 0"}}>
+          <div style={{fontSize:14,color:"#534AB7",fontWeight:600,marginBottom:6}}>Drafting...</div>
+          <div style={{fontSize:12,color:"#9e9c96"}}>Reading pipeline and generating. About 15 seconds.</div>
+        </div>
+      )}
+
+      {/* QA + Draft */}
+      {(step==="qa"||step==="done")&&(
+        <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:20,alignItems:"start"}}>
+
+          {/* Left: QA */}
+          <div style={{position:"sticky",top:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#1a1a18",marginBottom:10,display:"flex",alignItems:"center",gap:8}}>
+              Review before sending
+              {qaItems.length>0&&<span style={{background:"#993C1D",color:"white",borderRadius:10,padding:"1px 7px",fontSize:11}}>{qaItems.length}</span>}
+            </div>
+            {qaItems.length===0?(
+              <div style={{padding:"10px 12px",background:"#EAF3DE",border:"1px solid #3B6D1133",borderRadius:8,fontSize:12,color:"#27500A",marginBottom:12}}>
+                No flags. All active deals have notes and recent activity.
+              </div>
+            ):(
+              qaItems.map((item,i)=>(
+                <div key={i} style={{marginBottom:10,padding:"10px 12px",background:"#FAECE7",border:"1px solid #993C1D33",borderRadius:8}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#712B13",marginBottom:4}}>{item.dealName}</div>
+                  <div style={{fontSize:12,color:"#712B13",lineHeight:1.6,marginBottom:6}}>{item.question}</div>
+                  <textarea
+                    value={answers[item.dealName]||""}
+                    onChange={e=>setAnswers(a=>({...a,[item.dealName]:e.target.value}))}
+                    placeholder="Your answer..."
+                    style={{width:"100%",boxSizing:"border-box",padding:"6px 8px",border:"1px solid #993C1D55",borderRadius:5,fontSize:12,minHeight:52,resize:"vertical",fontFamily:"inherit",color:"#1a1a18",background:"white"}}
+                  />
+                </div>
+              ))
+            )}
+            {qaItems.length>0&&(
+              <button type="button" onClick={regenerate} style={{...btnPrimary,width:"100%",marginTop:4}}>
+                Regenerate with answers
+              </button>
+            )}
+            {error&&<div style={{fontSize:11,color:"#993C1D",marginTop:8}}>{error}</div>}
+            <div style={{marginTop:12,display:"flex",gap:8}}>
+              <button type="button" onClick={()=>setStep("idle")} style={btnSecondary}>Start over</button>
+              <button type="button" onClick={exportPDF} style={{...btnPrimary,background:"#27500A",marginLeft:"auto"}}>Export PDF</button>
+            </div>
+          </div>
+
+          {/* Right: Draft per deal */}
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:"#1a1a18",marginBottom:10}}>
+              Weekly Draft
+              <span style={{fontSize:11,color:"#9e9c96",fontWeight:400,marginLeft:8}}>edit inline before exporting</span>
+            </div>
+            {draftItems.map((d,i)=>(
+              <div key={i} style={{marginBottom:14,padding:"12px 14px",border:"1px solid #e0ded6",borderRadius:8,background:d._edited?"#FFFDF5":"white"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontSize:13,fontWeight:700,color:"#1a1a18"}}>{d.dealName}</span>
+                  <span style={{fontSize:11,background:"#EEEDFE",color:"#3C3489",padding:"1px 7px",borderRadius:10,fontWeight:600}}>{d.status}</span>
+                  {d._edited&&<span style={{fontSize:10,color:"#854F0B",marginLeft:"auto"}}>edited</span>}
+                </div>
+                {/* Thesis */}
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#534AB7",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>Thesis</div>
+                  <textarea value={d.thesis||""} onChange={e=>updateDraft(i,"thesis",e.target.value)}
+                    style={{width:"100%",boxSizing:"border-box",padding:"5px 8px",border:"1px solid #e8e6de",borderRadius:5,fontSize:12,minHeight:40,resize:"vertical",fontFamily:"inherit",color:"#534AB7",fontWeight:500,background:"#EEEDFE44"}}/>
+                </div>
+                {/* What's new */}
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#9e9c96",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>This week</div>
+                  <textarea value={d.whatsNew||""} onChange={e=>updateDraft(i,"whatsNew",e.target.value)}
+                    style={{width:"100%",boxSizing:"border-box",padding:"5px 8px",border:"1px solid #e8e6de",borderRadius:5,fontSize:12,minHeight:52,resize:"vertical",fontFamily:"inherit",color:"#1a1a18"}}/>
+                </div>
+                {/* Next step */}
+                <div style={{marginBottom: d.blocker ? 6 : 0}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#9e9c96",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>Next step</div>
+                  <textarea value={d.nextStep||""} onChange={e=>updateDraft(i,"nextStep",e.target.value)}
+                    style={{width:"100%",boxSizing:"border-box",padding:"5px 8px",border:"1px solid #e8e6de",borderRadius:5,fontSize:12,minHeight:36,resize:"vertical",fontFamily:"inherit",color:"#1a1a18"}}/>
+                </div>
+                {/* Blocker */}
+                {d.blocker&&(
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:"#993C1D",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2,marginTop:6}}>Blocker</div>
+                    <textarea value={d.blocker||""} onChange={e=>updateDraft(i,"blocker",e.target.value)}
+                      style={{width:"100%",boxSizing:"border-box",padding:"5px 8px",border:"1px solid #993C1D44",borderRadius:5,fontSize:12,minHeight:32,resize:"vertical",fontFamily:"inherit",color:"#993C1D",background:"#FAECE744"}}/>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+        </div>
+      )}
+    </div>
   );
 }
+
 
 // ── Main app ───────────────────────────────────────────────────────────────────
 function App() {
